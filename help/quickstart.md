@@ -68,6 +68,8 @@ nohup .venv/bin/desired-state-web --host 0.0.0.0 --port 5051 > sessions/web.log 
 
 Inspect errors with `tail -n 50 sessions/web.log`; the collector writes per-session logs under `sessions/`. Stop the background server with `pkill -f 'desired-state-web --host 0.0.0.0 --port 5051'`.
 
+After installing the launcher, use `bash desired-state.sh start` from the repo directory. It waits until the server responds before reporting success and redirects output to `sessions/web.log`. Use `bash desired-state.sh status`, `bash desired-state.sh logs`, `bash desired-state.sh stop`, or `bash desired-state.sh restart`. The first launch after updating from the older manual `nohup` command requires stopping that old instance once; the launcher will report that port 5051 is already occupied otherwise.
+
 ## Recorded history
 
 The web page's Recorded history section lists the latest 100 sessions for a selected saved Polar ID. Click a session to view recorded HR and RR timelines. It shows the participant assignment captured at the time of recording, even if that device is assigned to a different person later. Long plots reduce displayed points; the original JSONL files remain complete. The session list reads existing `sessions/<session_id>/manifest.json`, `measurements.jsonl`, and `rr.jsonl`, including earlier CLI sessions with a matching scanned Polar ID.
