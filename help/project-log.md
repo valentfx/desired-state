@@ -48,3 +48,6 @@ Keep this file updated with each meaningful change. Record what changed, why, ve
 - Current JSONL append calls are synchronous and intended for low-rate HR/RR data; measure sustained multi-sensor runs before choosing a storage queue or database.
 - BLE reconnect currently retries the initially discovered address. Validate address stability and rediscovery on the Pi; BLE adapters, RF conditions, and H10 receiver slots may constrain concurrent sessions.
 - One live acquisition on the Pi succeeded. Multi-strap collection, Flask control, interruption cleanup, and sustained operation have not yet been validated on hardware. No physiological interpretation or adaptive session logic is implemented.
+# Session history update (Sep 26, 2026)
+
+Added device-filtered recorded session history over existing JSONL sessions. A manifest identifies which Polar IDs participated and preserves the assignment at recording time. The reader counts and summarizes the complete HR and RR streams, while the detail API reduces plot points for browser display without changing raw files. The UI lists sessions for a saved H10 and plots HR and RR after selection. Next validation: run all tests and view an existing 60-second Pi recording; then compare the exact Battery Analyzer workflow if its project files become available.

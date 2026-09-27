@@ -48,6 +48,18 @@ def create_app(session_root: Path | None = None, controller=None):
             raise ValueError("assignments must be a map of Polar ID to participant ID")
         return jsonify(service.start(assignments, body.get("seconds", 60))), 201
 
+    @app.get("/api/v1/sessions")
+    def history():
+        try:
+            limit = int(request.args.get("limit", "100"))
+        except ValueError as exc:
+            raise ValueError("limit must be an integer") from exc
+        return jsonify(sessions=service.history(request.args.get("polar_id"), limit))
+
+    @app.get("/api/v1/sessions/<session_id>/devices/<polar_id>/timeline")
+    def session_timeline(session_id, polar_id):
+        return jsonify(service.timeline(session_id, polar_id))
+
     @app.post("/api/v1/sessions/active/stop")
     def stop():
         return jsonify(service.stop())

@@ -9,13 +9,14 @@
     body { max-width: 1100px; margin: 2rem auto; padding: 0 1rem }
     h1 { font-size: 1.7rem; margin-bottom:.3rem } h2 { font-size:1.15rem }
     p, small { color:#9ca3af } .panel { background:#1f2937; border:1px solid #374151; border-radius:12px; padding:1rem; margin:1rem 0 }
-    button,input { font:inherit; padding:.5rem .7rem; border-radius:6px; border:1px solid #4b5563; color:#e5e7eb; background:#111827 }
+    button,input,select { font:inherit; padding:.5rem .7rem; border-radius:6px; border:1px solid #4b5563; color:#e5e7eb; background:#111827 }
     button { cursor:pointer; background:#2563eb; border-color:#2563eb } button:disabled { opacity:.5; cursor:default }
     button.secondary { background:#374151; border-color:#4b5563 } .row { display:flex; gap:.7rem; align-items:center; flex-wrap:wrap; margin:.7rem 0 }
     label { display:flex; gap:.5rem; align-items:center } input[type=number] { width:6rem } .participant { width:12rem }
     .sensor { border-top:1px solid #374151; padding:.6rem 0 } .sensor:first-child { border-top:0 }
     table { width:100%; border-collapse:collapse } th,td { text-align:left; padding:.5rem; border-bottom:1px solid #374151 }
     .error { color:#fca5a5 } .ok { color:#86efac } code { color:#bfdbfe }
+    .chart { width:100%; height:170px; background:#111827; border-radius:6px } .history-row { cursor:pointer }
   </style>
 </head>
 <body>
@@ -35,6 +36,15 @@
     <p><small>Values update about once per second. RR receipt time is the packet arrival time, not an exact beat time. Recordings remain in <code>sessions/</code> on the Pi.</small></p>
     <h2>Recent events</h2><div id="events"></div>
   </section>
+  <section class="panel">
+    <h2>Recorded history</h2>
+    <div class="row"><label>Device <select id="history-device"></select></label><button id="history-refresh" class="secondary">Refresh history</button></div>
+    <table><thead><tr><th>Session</th><th>Participant</th><th>First reading (UTC)</th><th>HR readings</th><th>RR intervals</th><th>HR range</th></tr></thead><tbody id="history-rows"></tbody></table>
+    <h2 id="history-title">Select a session</h2>
+    <p><small>These plots show recorded packet arrival times. Points are reduced for display on long sessions; raw JSONL files remain complete.</small></p>
+    <p>Heart rate (bpm)</p><svg id="hr-chart" class="chart" viewBox="0 0 800 170" preserveAspectRatio="none" aria-label="Recorded heart rate"></svg>
+    <p>RR interval (ms)</p><svg id="rr-chart" class="chart" viewBox="0 0 800 170" preserveAspectRatio="none" aria-label="Recorded RR intervals"></svg>
+  </section>
 <script>
 const $ = id => document.getElementById(id);
 let selected = [], lastSession = null;
@@ -45,6 +55,37 @@ async function api(url, options) {
   return data;
 }
 function message(text, error=false) { $('message').textContent=text; $('message').className=error?'error':''; }
+function plot(element, points) {
+  element.replaceChildren();
+  const data=points.filter(p=>Number.isFinite(p.value) && !Number.isNaN(Date.parse(p.at)));
+  if (!data.length) { const label=document.createElementNS('http://www.w3.org/2000/svg','text'); label.setAttribute('x','20'); label.setAttribute('y','85'); label.setAttribute('fill','#9ca3af'); label.textContent='No readings'; element.append(label); return; }
+  const times=data.map(p=>Date.parse(p.at)), low=Math.min(...data.map(p=>p.value)), high=Math.max(...data.map(p=>p.value));
+  const start=Math.min(...times), end=Math.max(...times);
+  const path=document.createElementNS('http://www.w3.org/2000/svg','polyline');
+  path.setAttribute('points',data.map((p,i)=>`${20+760*(times[i]-start)/(end-start||1)},${145-115*(p.value-low)/(high-low||1)}`).join(' '));
+  path.setAttribute('fill','none'); path.setAttribute('stroke','#60a5fa'); path.setAttribute('stroke-width','2'); element.append(path);
+  const label=document.createElementNS('http://www.w3.org/2000/svg','text'); label.setAttribute('x','20'); label.setAttribute('y','20'); label.setAttribute('fill','#e5e7eb'); label.textContent=`${low.toFixed(1)}–${high.toFixed(1)} · ${data.length} displayed points`; element.append(label);
+}
+async function loadHistory() {
+  try {
+    const known=await api('/api/v1/devices/known'), selector=$('history-device'), previous=selector.value;
+    selector.replaceChildren();
+    for (const d of known.devices) { const option=document.createElement('option'); option.value=d.polar_id; option.textContent=`${d.name} · ${d.polar_id}`; selector.append(option); }
+    if (known.devices.some(d=>d.polar_id===previous)) selector.value=previous;
+    $('history-rows').replaceChildren();
+    if (!selector.value) return;
+    const data=await api(`/api/v1/sessions?polar_id=${encodeURIComponent(selector.value)}&limit=100`);
+    for (const s of data.sessions) {
+      const row=document.createElement('tr'); row.className='history-row';
+      for (const value of [s.session_id,s.assignments[selector.value],s.started_utc||'No readings',s.measurement_count,s.rr_count,s.hr_min===null?'—':`${s.hr_min}–${s.hr_max}`]) { const cell=document.createElement('td'); cell.textContent=value; row.append(cell); }
+      row.onclick=async()=>{
+        try { const timeline=await api(`/api/v1/sessions/${encodeURIComponent(s.session_id)}/devices/${encodeURIComponent(selector.value)}/timeline`); $('history-title').textContent=`${s.session_id} · ${timeline.participant_id}`; plot($('hr-chart'),timeline.measurements); plot($('rr-chart'),timeline.rr); }
+        catch(e) { message(e.message,true); }
+      };
+      $('history-rows').append(row);
+    }
+  } catch(e) { message(e.message,true); }
+}
 function renderDevices(devices, remembered=false) {
   selected=devices;
   $('sensors').replaceChildren();
@@ -66,7 +107,7 @@ async function scan() {
   $('scan').disabled=true; $('scan-state').textContent='Scanning for 8 seconds…';
   try {
     const data=await api('/api/v1/devices'); renderDevices(data.devices);
-    message(`Found ${selected.length} H10 strap(s).`);
+    message(`Found ${selected.length} H10 strap(s).`); loadHistory();
   } catch(e) { message(e.message,true); }
   finally { $('scan').disabled=false; $('scan-state').textContent=''; }
 }
@@ -112,7 +153,9 @@ async function refresh() {
   } catch(e) { message(e.message,true); }
 }
 $('scan').onclick=scan; $('start').onclick=start; $('stop').onclick=stop;
+$('history-refresh').onclick=loadHistory; $('history-device').onchange=loadHistory;
 api('/api/v1/devices/known').then(data=>renderDevices(data.devices,true)).catch(e=>message(e.message,true));
+loadHistory();
 refresh(); setInterval(refresh,1000);
 </script>
 </body>

@@ -21,6 +21,12 @@ class FakeController:
     def assign_device(self, polar_id, participant_id):
         return {"polar_id": polar_id, "participant_id": participant_id}
 
+    def history(self, polar_id, limit):
+        return [{"session_id": "example", "assignments": {polar_id: "person_1"}}]
+
+    def timeline(self, session_id, polar_id):
+        return {"session_id": session_id, "polar_id": polar_id, "measurements": [], "rr": []}
+
     def status(self):
         return {"session_id": None, "running": False, "return_code": None, "log_tail": ""}
 
@@ -52,6 +58,12 @@ class ApiTests(unittest.TestCase):
         response = self.client.get("/api/v1/sessions/example/rr?limit=5")
         self.assertEqual(response.json["rows"][0]["stream"], "rr")
         self.assertEqual(self.client.get("/api/v1/sessions/example/rr?limit=oops").status_code, 400)
+
+    def test_history_and_timeline(self):
+        response = self.client.get("/api/v1/sessions?polar_id=E9E53B2C")
+        self.assertEqual(response.json["sessions"][0]["session_id"], "example")
+        response = self.client.get("/api/v1/sessions/example/devices/E9E53B2C/timeline")
+        self.assertEqual(response.json["polar_id"], "E9E53B2C")
 
 
 if __name__ == "__main__":

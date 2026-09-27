@@ -67,3 +67,7 @@ nohup .venv/bin/desired-state-web --host 0.0.0.0 --port 5051 > sessions/web.log 
 ```
 
 Inspect errors with `tail -n 50 sessions/web.log`; the collector writes per-session logs under `sessions/`. Stop the background server with `pkill -f 'desired-state-web --host 0.0.0.0 --port 5051'`.
+
+## Recorded history
+
+The web page's Recorded history section lists the latest 100 sessions for a selected saved Polar ID. Click a session to view recorded HR and RR timelines. It shows the participant assignment captured at the time of recording, even if that device is assigned to a different person later. Long plots reduce displayed points; the original JSONL files remain complete. The session list reads existing `sessions/<session_id>/manifest.json`, `measurements.jsonl`, and `rr.jsonl`, including earlier CLI sessions with a matching scanned Polar ID.
