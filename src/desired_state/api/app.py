@@ -60,6 +60,10 @@ def create_app(session_root: Path | None = None, controller=None):
     def session_timeline(session_id, polar_id):
         return jsonify(service.timeline(session_id, polar_id))
 
+    @app.get("/api/v1/sessions/<session_id>/devices/<polar_id>/metrics")
+    def session_metrics(session_id, polar_id):
+        return jsonify(service.metrics(session_id, polar_id))
+
     @app.post("/api/v1/sessions/active/stop")
     def stop():
         return jsonify(service.stop())

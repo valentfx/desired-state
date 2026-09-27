@@ -27,6 +27,9 @@ class FakeController:
     def timeline(self, session_id, polar_id):
         return {"session_id": session_id, "polar_id": polar_id, "measurements": [], "rr": []}
 
+    def metrics(self, session_id, polar_id):
+        return {"session_id": session_id, "polar_id": polar_id, "rmssd_ms": 30}
+
     def status(self):
         return {"session_id": None, "running": False, "return_code": None, "log_tail": ""}
 
@@ -64,6 +67,8 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.json["sessions"][0]["session_id"], "example")
         response = self.client.get("/api/v1/sessions/example/devices/E9E53B2C/timeline")
         self.assertEqual(response.json["polar_id"], "E9E53B2C")
+        response = self.client.get("/api/v1/sessions/example/devices/E9E53B2C/metrics")
+        self.assertEqual(response.json["rmssd_ms"], 30)
 
 
 if __name__ == "__main__":

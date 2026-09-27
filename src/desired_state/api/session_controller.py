@@ -11,7 +11,7 @@ from uuid import uuid4
 
 from desired_state.platforms.raspberry_pi.collect import discover_h10
 from desired_state.api.device_registry import DeviceRegistry
-from desired_state.storage.history import sessions as list_history, timeline
+from desired_state.storage.history import sessions as list_history, timeline, hrv_metrics
 
 ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,80}\Z")
 
@@ -42,6 +42,9 @@ class SessionController:
 
     def timeline(self, session_id, polar_id):
         return timeline(self.root, session_id, polar_id)
+
+    def metrics(self, session_id, polar_id):
+        return hrv_metrics(self.root, session_id, polar_id)
 
     def assign_device(self, polar_id, participant_id):
         return self.registry.assign(polar_id, participant_id)

@@ -41,6 +41,8 @@
     <div class="row"><label>Device <select id="history-device"></select></label><button id="history-refresh" class="secondary">Refresh history</button></div>
     <table><thead><tr><th>Session</th><th>Participant</th><th>First reading (UTC)</th><th>HR readings</th><th>RR intervals</th><th>HR range</th></tr></thead><tbody id="history-rows"></tbody></table>
     <h2 id="history-title">Select a session</h2>
+    <div id="hrv-metrics" class="row"></div>
+    <p id="hrv-quality"><small>RMSSD, SDNN, and pNN50 will appear when you select a session.</small></p>
     <p><small>These plots show recorded packet arrival times. Points are reduced for display on long sessions; raw JSONL files remain complete.</small></p>
     <p>Heart rate (bpm)</p><svg id="hr-chart" class="chart" viewBox="0 0 800 170" preserveAspectRatio="none" aria-label="Recorded heart rate"></svg>
     <p>RR interval (ms)</p><svg id="rr-chart" class="chart" viewBox="0 0 800 170" preserveAspectRatio="none" aria-label="Recorded RR intervals"></svg>
@@ -79,7 +81,17 @@ async function loadHistory() {
       const row=document.createElement('tr'); row.className='history-row';
       for (const value of [s.session_id,s.assignments[selector.value],s.started_utc||'No readings',s.measurement_count,s.rr_count,s.hr_min===null?'—':`${s.hr_min}–${s.hr_max}`]) { const cell=document.createElement('td'); cell.textContent=value; row.append(cell); }
       row.onclick=async()=>{
-        try { const timeline=await api(`/api/v1/sessions/${encodeURIComponent(s.session_id)}/devices/${encodeURIComponent(selector.value)}/timeline`); $('history-title').textContent=`${s.session_id} · ${timeline.participant_id}`; plot($('hr-chart'),timeline.measurements); plot($('rr-chart'),timeline.rr); }
+        try {
+          const base=`/api/v1/sessions/${encodeURIComponent(s.session_id)}/devices/${encodeURIComponent(selector.value)}`;
+          const [timeline,metrics]=await Promise.all([api(`${base}/timeline`),api(`${base}/metrics`)]);
+          $('history-title').textContent=`${s.session_id} · ${timeline.participant_id}`;
+          plot($('hr-chart'),timeline.measurements); plot($('rr-chart'),timeline.rr);
+          $('hrv-metrics').replaceChildren();
+          for (const [name,value] of [['RMSSD',metrics.rmssd_ms===null?'—':`${metrics.rmssd_ms} ms`],['SDNN',metrics.sdnn_ms===null?'—':`${metrics.sdnn_ms} ms`],['pNN50',metrics.pnn50_percent===null?'—':`${metrics.pnn50_percent}%`],['Mean HR from RR',metrics.mean_hr_from_rr_bpm===null?'—':`${metrics.mean_hr_from_rr_bpm} bpm`]]) {
+            const item=document.createElement('span'); item.textContent=`${name}: ${value}`; $('hrv-metrics').append(item);
+          }
+          $('hrv-quality').textContent=`${metrics.intervals_accepted}/${metrics.intervals_total} RR intervals accepted; ${metrics.adjacent_pairs} adjacent pairs; ${metrics.span_seconds===null?'unknown':metrics.span_seconds+' s'} first-to-last RR receipt span. ${metrics.quality_note}`;
+        }
         catch(e) { message(e.message,true); }
       };
       $('history-rows').append(row);

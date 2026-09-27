@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import re
+from desired_state.processing.hrv import summarize_rr
 
 SAFE_ID = re.compile(r"[A-Za-z0-9_-]{1,80}\Z")
 
@@ -86,3 +87,12 @@ def timeline(root: Path, session_id: str, polar_id: str, max_points=800):
                         if index % stride == 0 or index == total - 1]
     return {"session_id": session_id, "polar_id": polar_id,
             "participant_id": assignments[polar_id], **output}
+
+
+def hrv_metrics(root: Path, session_id: str, polar_id: str):
+    # Reuse manifest membership and path validation from the timeline reader.
+    record = timeline(root, session_id, polar_id, max_points=1)
+    rows = (row for row in _rows(root / session_id / "rr.jsonl")
+            if row.get("polar_id") == polar_id)
+    return {"session_id": session_id, "polar_id": polar_id,
+            "participant_id": record["participant_id"], **summarize_rr(rows)}

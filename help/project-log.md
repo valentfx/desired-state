@@ -51,3 +51,7 @@ Keep this file updated with each meaningful change. Record what changed, why, ve
 # Session history update (Sep 26, 2026)
 
 Added device-filtered recorded session history over existing JSONL sessions. A manifest identifies which Polar IDs participated and preserves the assignment at recording time. The reader counts and summarizes the complete HR and RR streams, while the detail API reduces plot points for browser display without changing raw files. The UI lists sessions for a saved H10 and plots HR and RR after selection. Next validation: run all tests and view an existing 60-second Pi recording; then compare the exact Battery Analyzer workflow if its project files become available.
+
+# Provisional HRV update (Sep 26, 2026)
+
+Added versioned offline RR metrics (`rr-time-domain-v1`) behind a session/device API and history detail view. It computes RMSSD on accepted contiguous pairs, sample SDNN, pNN50, and mean HR derived from RR. It exposes acceptance and gap counts, preserves raw intervals, and labels the output provisional because normal-to-normal beats are not ECG verified. Longer resting baselines, artifact review, and a validated processing method precede comparative or adaptive use. LF/HF and any stress score are deferred.
