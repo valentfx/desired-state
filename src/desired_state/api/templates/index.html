@@ -23,6 +23,7 @@
   <section class="panel">
     <h2>Assign sensors</h2>
     <div class="row"><button id="scan">Scan for H10 straps</button><span id="scan-state"></span></div>
+    <p><small>Assignments are saved by Polar ID. Edit a participant and choose Save; starting a session also saves selected assignments. The Bluetooth address is retained from the latest scan.</small></p>
     <div id="sensors">Scan to discover straps. Wear and moisten each strap first.</div>
     <div class="row"><label>Duration (seconds) <input id="seconds" type="number" min="10" max="86400" value="60"></label>
       <button id="start">Start recording</button><button id="stop" class="secondary">Stop</button></div>
@@ -44,19 +45,27 @@ async function api(url, options) {
   return data;
 }
 function message(text, error=false) { $('message').textContent=text; $('message').className=error?'error':''; }
+function renderDevices(devices, remembered=false) {
+  selected=devices;
+  $('sensors').replaceChildren();
+  if (!selected.length) $('sensors').textContent=remembered?'No saved straps. Scan to discover one.':'No H10 advertisements found.';
+  for (const [index,d] of selected.entries()) {
+    const row=document.createElement('div'); row.className='sensor row';
+    const check=document.createElement('input'); check.type='checkbox'; check.checked=!remembered; check.dataset.id=d.polar_id;
+    const label=document.createElement('span'); label.textContent=`${d.name} · ${d.polar_id} · ${d.address||'address unknown'}`;
+    const input=document.createElement('input'); input.className='participant'; input.placeholder='Participant ID'; input.value=d.participant_id||'person_'+(index+1); input.dataset.participant=d.polar_id;
+    const save=document.createElement('button'); save.type='button'; save.className='secondary'; save.textContent='Save';
+    save.onclick=async()=>{
+      try { await api(`/api/v1/devices/${encodeURIComponent(d.polar_id)}/assignment`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({participant_id:input.value.trim()})}); message(`Saved assignment for ${d.polar_id}.`); }
+      catch(e) { message(e.message,true); }
+    };
+    row.append(check,label,input,save); $('sensors').append(row);
+  }
+}
 async function scan() {
   $('scan').disabled=true; $('scan-state').textContent='Scanning for 8 seconds…';
   try {
-    const data=await api('/api/v1/devices'); selected=data.devices;
-    $('sensors').replaceChildren();
-    if (!selected.length) $('sensors').textContent='No H10 advertisements found.';
-    for (const d of selected) {
-      const row=document.createElement('div'); row.className='sensor row';
-      const check=document.createElement('input'); check.type='checkbox'; check.checked=true; check.dataset.id=d.polar_id;
-      const label=document.createElement('span'); label.textContent=`${d.name} · ${d.polar_id}`;
-      const input=document.createElement('input'); input.className='participant'; input.placeholder='Participant ID'; input.value='person_'+(selected.indexOf(d)+1); input.dataset.participant=d.polar_id;
-      row.append(check,label,input); $('sensors').append(row);
-    }
+    const data=await api('/api/v1/devices'); renderDevices(data.devices);
     message(`Found ${selected.length} H10 strap(s).`);
   } catch(e) { message(e.message,true); }
   finally { $('scan').disabled=false; $('scan-state').textContent=''; }
@@ -103,6 +112,7 @@ async function refresh() {
   } catch(e) { message(e.message,true); }
 }
 $('scan').onclick=scan; $('start').onclick=start; $('stop').onclick=stop;
+api('/api/v1/devices/known').then(data=>renderDevices(data.devices,true)).catch(e=>message(e.message,true));
 refresh(); setInterval(refresh,1000);
 </script>
 </body>

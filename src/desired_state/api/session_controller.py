@@ -10,6 +10,7 @@ from threading import Lock
 from uuid import uuid4
 
 from desired_state.platforms.raspberry_pi.collect import discover_h10
+from desired_state.api.device_registry import DeviceRegistry
 
 ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,80}\Z")
 
@@ -18,6 +19,7 @@ class SessionController:
     def __init__(self, root: Path):
         self.root = root.resolve()
         self.root.mkdir(parents=True, exist_ok=True)
+        self.registry = DeviceRegistry(self.root / "devices.json")
         self._lock = Lock()
         self._process = None
         self._session_id = None
@@ -28,8 +30,14 @@ class SessionController:
             if self._process is not None and self._process.poll() is None:
                 raise RuntimeError("Stop the recording before scanning")
             devices = asyncio.run(discover_h10(8))
-        return [{"polar_id": key, "name": device.name, "address": device.address}
-                for key, device in sorted(devices.items())]
+        return self.registry.observe([{"polar_id": key, "name": device.name, "address": device.address}
+                                      for key, device in sorted(devices.items())])
+
+    def known_devices(self):
+        return self.registry.list()
+
+    def assign_device(self, polar_id, participant_id):
+        return self.registry.assign(polar_id, participant_id)
 
     def start(self, assignments: dict[str, str], seconds: int):
         if not assignments or len(assignments) > 32:
@@ -51,6 +59,8 @@ class SessionController:
                 raise RuntimeError("A session is already recording")
             if self._log is not None:
                 self._log.close()
+            for sensor_id, user_id in normalized.items():
+                self.registry.assign(sensor_id, user_id)
             session_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid4().hex[:8]
             log = (self.root / f"{session_id}.log").open("w")
             command = [sys.executable, "-m", "desired_state.platforms.raspberry_pi.collect",

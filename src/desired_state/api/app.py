@@ -27,6 +27,15 @@ def create_app(session_root: Path | None = None, controller=None):
     def devices():
         return jsonify(devices=service.scan())
 
+    @app.get("/api/v1/devices/known")
+    def known_devices():
+        return jsonify(devices=service.known_devices())
+
+    @app.put("/api/v1/devices/<polar_id>/assignment")
+    def assign_device(polar_id):
+        body = request.get_json(silent=True) or {}
+        return jsonify(service.assign_device(polar_id, body.get("participant_id")))
+
     @app.get("/api/v1/sessions/active")
     def active():
         return jsonify(service.status())

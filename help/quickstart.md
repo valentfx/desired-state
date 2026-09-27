@@ -52,3 +52,18 @@ Find the Pi address with `hostname -I`. If the Windows PC cannot reach it, check
 - If Linux reports missing D-Bus/BlueZ, confirm Bluetooth is enabled and the Pi Bluetooth service is running.
 
 Test sequence: one sensor for 60 seconds; two sensors with disconnect/reconnect; then 4, 6, and 8 with sustained sessions. Review missing data and reconnect behavior before increasing load.
+
+## Remembered straps and quiet Pi launch
+
+The web page saves scanned Polar IDs, latest observed Bluetooth addresses, and participant assignments in `sessions/devices.json`. Choose Save after changing a participant; starting a session also saves selected assignments. The participant can change while the Polar ID remains the device identity. Scan again before recording because the collector discovers the current BLE address.
+
+Run the server in the background with terminal output redirected to a file:
+
+```bash
+clear
+cd ~/1dev/desired-state
+mkdir -p sessions
+nohup .venv/bin/desired-state-web --host 0.0.0.0 --port 5051 > sessions/web.log 2>&1 < /dev/null &
+```
+
+Inspect errors with `tail -n 50 sessions/web.log`; the collector writes per-session logs under `sessions/`. Stop the background server with `pkill -f 'desired-state-web --host 0.0.0.0 --port 5051'`.
