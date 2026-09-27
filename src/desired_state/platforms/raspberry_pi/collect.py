@@ -3,6 +3,7 @@ import argparse
 import asyncio
 from datetime import datetime, timezone
 import time
+import re
 from pathlib import Path
 from uuid import uuid4
 
@@ -24,11 +25,16 @@ def polar_id(device):
     return (device.name or "").split()[-1].upper()
 
 
-async def scan(seconds: float):
+async def discover_h10(seconds: float):
     results = await BleakScanner.discover(timeout=seconds)
-    for device in sorted(results, key=lambda item: item.name or ""):
-        if (device.name or "").lower().startswith("polar h10 "):
-            print(f"{polar_id(device):16} {device.address:20} {device.name}")
+    return {polar_id(d): d for d in results
+            if (d.name or "").lower().startswith("polar h10 ")}
+
+
+async def scan(seconds: float):
+    devices = await discover_h10(seconds)
+    for sensor_id, device in sorted(devices.items()):
+        print(f"{sensor_id:16} {device.address:20} {device.name}")
 
 
 async def acquire(sensor_id, participant_id, address, session_id, writer, deadline):
@@ -73,13 +79,14 @@ async def acquire(sensor_id, participant_id, address, session_id, writer, deadli
             delay = min(delay * 2, 30.0)
 
 
-async def record(assignments, seconds, root):
-    found = await BleakScanner.discover(timeout=12)
-    devices = {polar_id(d): d for d in found if (d.name or "").lower().startswith("polar h10 ")}
+async def record(assignments, seconds, root, session_id=None):
+    devices = await discover_h10(12)
     missing = set(assignments) - set(devices)
     if missing:
         raise SystemExit(f"Assigned H10 IDs not found: {', '.join(sorted(missing))}; run scan first")
-    session_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid4().hex[:8]
+    session_id = session_id or (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid4().hex[:8])
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", session_id):
+        raise ValueError("invalid session ID")
     writer = SessionWriter(root, session_id, assignments)
     try:
         writer.write("events", {"event": "session_started", "session_id": session_id, **now()})
@@ -87,8 +94,8 @@ async def record(assignments, seconds, root):
         await asyncio.gather(*(acquire(sensor_id, user_id, devices[sensor_id].address,
                                        session_id, writer, deadline)
                                for sensor_id, user_id in assignments.items()))
-        writer.write("events", {"event": "session_ended", "session_id": session_id, **now()})
     finally:
+        writer.write("events", {"event": "session_ended", "session_id": session_id, **now()})
         writer.close()
     print(f"Session: {writer.path}\nRows: {writer.counts}")
 
@@ -102,6 +109,7 @@ def main():
     recorder.add_argument("--assign", action="append", required=True, metavar="POLAR_ID=USER_ID")
     recorder.add_argument("--seconds", type=float, default=60)
     recorder.add_argument("--output", type=Path, default=Path("sessions"))
+    recorder.add_argument("--session-id", help="safe session ID assigned by session controller")
     args = parser.parse_args()
     if args.command == "scan":
         asyncio.run(scan(args.seconds))
@@ -117,7 +125,10 @@ def main():
             assignments[sensor_id] = user_id.strip()
         if args.seconds <= 0:
             parser.error("--seconds must be positive")
-        asyncio.run(record(assignments, args.seconds, args.output))
+        try:
+            asyncio.run(record(assignments, args.seconds, args.output, args.session_id))
+        except KeyboardInterrupt:
+            print("Session stopped")
 
 
 if __name__ == "__main__":

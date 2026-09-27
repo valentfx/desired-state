@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Desired State · H10 research</title>
+  <style>
+    :root { color-scheme: dark; font: 16px system-ui, sans-serif; background:#111827; color:#e5e7eb }
+    body { max-width: 1100px; margin: 2rem auto; padding: 0 1rem }
+    h1 { font-size: 1.7rem; margin-bottom:.3rem } h2 { font-size:1.15rem }
+    p, small { color:#9ca3af } .panel { background:#1f2937; border:1px solid #374151; border-radius:12px; padding:1rem; margin:1rem 0 }
+    button,input { font:inherit; padding:.5rem .7rem; border-radius:6px; border:1px solid #4b5563; color:#e5e7eb; background:#111827 }
+    button { cursor:pointer; background:#2563eb; border-color:#2563eb } button:disabled { opacity:.5; cursor:default }
+    button.secondary { background:#374151; border-color:#4b5563 } .row { display:flex; gap:.7rem; align-items:center; flex-wrap:wrap; margin:.7rem 0 }
+    label { display:flex; gap:.5rem; align-items:center } input[type=number] { width:6rem } .participant { width:12rem }
+    .sensor { border-top:1px solid #374151; padding:.6rem 0 } .sensor:first-child { border-top:0 }
+    table { width:100%; border-collapse:collapse } th,td { text-align:left; padding:.5rem; border-bottom:1px solid #374151 }
+    .error { color:#fca5a5 } .ok { color:#86efac } code { color:#bfdbfe }
+  </style>
+</head>
+<body>
+  <h1>Desired State</h1><p>Polar H10 research session · HR and raw RR intervals</p>
+  <section class="panel">
+    <h2>Assign sensors</h2>
+    <div class="row"><button id="scan">Scan for H10 straps</button><span id="scan-state"></span></div>
+    <div id="sensors">Scan to discover straps. Wear and moisten each strap first.</div>
+    <div class="row"><label>Duration (seconds) <input id="seconds" type="number" min="10" max="86400" value="60"></label>
+      <button id="start">Start recording</button><button id="stop" class="secondary">Stop</button></div>
+    <p id="message" role="status"></p>
+  </section>
+  <section class="panel">
+    <h2>Live session</h2><p id="session-state">No active session</p>
+    <table><thead><tr><th>Participant</th><th>Polar ID</th><th>HR (bpm)</th><th>Latest RR (ms)</th><th>Notifications</th><th>Connection</th></tr></thead><tbody id="live"></tbody></table>
+    <p><small>Values update about once per second. RR receipt time is the packet arrival time, not an exact beat time. Recordings remain in <code>sessions/</code> on the Pi.</small></p>
+    <h2>Recent events</h2><div id="events"></div>
+  </section>
+<script>
+const $ = id => document.getElementById(id);
+let selected = [], lastSession = null;
+async function api(url, options) {
+  const response = await fetch(url, {cache:'no-store', ...options});
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+  return data;
+}
+function message(text, error=false) { $('message').textContent=text; $('message').className=error?'error':''; }
+async function scan() {
+  $('scan').disabled=true; $('scan-state').textContent='Scanning for 8 seconds…';
+  try {
+    const data=await api('/api/v1/devices'); selected=data.devices;
+    $('sensors').replaceChildren();
+    if (!selected.length) $('sensors').textContent='No H10 advertisements found.';
+    for (const d of selected) {
+      const row=document.createElement('div'); row.className='sensor row';
+      const check=document.createElement('input'); check.type='checkbox'; check.checked=true; check.dataset.id=d.polar_id;
+      const label=document.createElement('span'); label.textContent=`${d.name} · ${d.polar_id}`;
+      const input=document.createElement('input'); input.className='participant'; input.placeholder='Participant ID'; input.value='person_'+(selected.indexOf(d)+1); input.dataset.participant=d.polar_id;
+      row.append(check,label,input); $('sensors').append(row);
+    }
+    message(`Found ${selected.length} H10 strap(s).`);
+  } catch(e) { message(e.message,true); }
+  finally { $('scan').disabled=false; $('scan-state').textContent=''; }
+}
+async function start() {
+  const assignments={};
+  for (const check of document.querySelectorAll('[data-id]')) if (check.checked) {
+    assignments[check.dataset.id]=document.querySelector(`[data-participant="${check.dataset.id}"]`).value.trim();
+  }
+  try {
+    const data=await api('/api/v1/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({assignments,seconds:Number($('seconds').value)})});
+    lastSession=data.session_id; message(`Session ${lastSession} starting. Discovery may take 12 seconds.`); refresh();
+  } catch(e) { message(e.message,true); }
+}
+async function stop() {
+  try { await api('/api/v1/sessions/active/stop',{method:'POST'}); message('Stopping session…'); }
+  catch(e) { message(e.message,true); }
+}
+async function refresh() {
+  try {
+    const state=await api('/api/v1/sessions/active');
+    $('start').disabled=state.running; $('stop').disabled=!state.running; $('scan').disabled=state.running;
+    if (state.session_id) lastSession=state.session_id;
+    $('session-state').textContent=lastSession ? `${lastSession} · ${state.running?'recording':'stopped'}${state.return_code ? ' · exit '+state.return_code : ''}` : 'No active session';
+    if (!state.running && state.return_code && state.log_tail) message(state.log_tail,true);
+    if (!lastSession) return;
+    const [hr,rr,events]=await Promise.all(['measurements','rr','events'].map(s=>api(`/api/v1/sessions/${lastSession}/${s}?limit=150`)));
+    const latest=new Map(), latestRR=new Map(), connections=new Map(), counts=new Map();
+    for (const r of hr.rows) { latest.set(r.polar_id,r); counts.set(r.polar_id,(counts.get(r.polar_id)||0)+1); }
+    for (const r of rr.rows) latestRR.set(r.polar_id,r.rr_ms);
+    for (const e of events.rows) if (e.polar_id && ['connected','disconnected','connection_error'].includes(e.event)) connections.set(e.polar_id,e.event);
+    $('live').replaceChildren();
+    for (const [id,r] of latest) {
+      const tr=document.createElement('tr');
+      for (const value of [r.user_id,id,r.heart_rate_bpm,latestRR.has(id)?latestRR.get(id).toFixed(1):'—',counts.get(id),connections.get(id)||'—']) {
+        const td=document.createElement('td'); td.textContent=value; tr.append(td);
+      }
+      $('live').append(tr);
+    }
+    $('events').replaceChildren();
+    for (const e of events.rows.slice(-6).reverse()) {
+      const line=document.createElement('div'); line.textContent=`${e.received_utc||''} · ${e.polar_id||'session'} · ${e.event}${e.detail?' · '+e.detail:''}`; $('events').append(line);
+    }
+  } catch(e) { message(e.message,true); }
+}
+$('scan').onclick=scan; $('start').onclick=start; $('stop').onclick=stop;
+refresh(); setInterval(refresh,1000);
+</script>
+</body>
+</html>

@@ -4,16 +4,20 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "desired-state"
-version = "0.1.0"
+version = "0.3.0"
 description = "Local-first biofeedback acquisition prototype"
 requires-python = ">=3.11"
-dependencies = ["bleak>=0.22,<4"]
+dependencies = ["bleak>=0.22,<4", "flask>=3.0,<4"]
 
 [project.scripts]
 desired-state-h10 = "desired_state.platforms.raspberry_pi.collect:main"
+desired-state-web = "desired_state.api.app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"desired_state.api" = ["templates/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
