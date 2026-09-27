@@ -37,14 +37,16 @@ async def scan(seconds: float):
         print(f"{sensor_id:16} {device.address:20} {device.name}")
 
 
-async def acquire(sensor_id, participant_id, address, session_id, writer, deadline):
+async def acquire(sensor_id, participant_id, device, session_id, writer, deadline):
     delay = 1.0
     while time.monotonic() < deadline:
         disconnected = asyncio.Event()
         def on_disconnect(_client):
             disconnected.set()
         try:
-            async with BleakClient(address, disconnected_callback=on_disconnect, timeout=20) as client:
+            # Pass the BLEDevice found by our scan: an address makes Bleak start
+            # an implicit second scan, which is fragile during concurrent connects.
+            async with BleakClient(device, disconnected_callback=on_disconnect, timeout=20) as client:
                 writer.write("events", {"event": "connected", "session_id": session_id,
                                         "polar_id": sensor_id, "user_id": participant_id, **now()})
                 delay = 1.0
@@ -77,6 +79,16 @@ async def acquire(sensor_id, participant_id, address, session_id, writer, deadli
         if time.monotonic() < deadline:
             await asyncio.sleep(min(delay, deadline - time.monotonic()))
             delay = min(delay * 2, 30.0)
+            # BlueZ may discard the discovery object after a disconnect. Refresh
+            # it by stable advertised Polar ID before the next attempt.
+            try:
+                replacement = (await discover_h10(5)).get(sensor_id)
+                if replacement is not None:
+                    device = replacement
+            except Exception as exc:
+                writer.write("events", {"event": "rediscovery_error", "session_id": session_id,
+                                        "polar_id": sensor_id, "user_id": participant_id,
+                                        "detail": str(exc), **now()})
 
 
 async def record(assignments, seconds, root, session_id=None):
@@ -91,7 +103,7 @@ async def record(assignments, seconds, root, session_id=None):
     try:
         writer.write("events", {"event": "session_started", "session_id": session_id, **now()})
         deadline = time.monotonic() + seconds
-        await asyncio.gather(*(acquire(sensor_id, user_id, devices[sensor_id].address,
+        await asyncio.gather(*(acquire(sensor_id, user_id, devices[sensor_id],
                                        session_id, writer, deadline)
                                for sensor_id, user_id in assignments.items()))
     finally:

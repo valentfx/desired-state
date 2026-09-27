@@ -55,3 +55,7 @@ Added device-filtered recorded session history over existing JSONL sessions. A m
 # Provisional HRV update (Sep 26, 2026)
 
 Added versioned offline RR metrics (`rr-time-domain-v1`) behind a session/device API and history detail view. It computes RMSSD on accepted contiguous pairs, sample SDNN, pNN50, and mean HR derived from RR. It exposes acceptance and gap counts, preserves raw intervals, and labels the output provisional because normal-to-normal beats are not ECG verified. Longer resting baselines, artifact review, and a validated processing method precede comparative or adaptive use. LF/HF and any stress score are deferred.
+
+# Concurrent H10 connection fix (Sep 26, 2026)
+
+The first Pi+Android attempt emitted a BlueZ device-path-not-found connection error. The collector passed a Bluetooth address into BleakClient after a separate discovery scan, which caused Bleak to perform another implicit discovery. Pass the scanned BLEDevice object directly. After a failed connection or disconnect, refresh it by advertised Polar ID before retrying. Hardware retest with HRV Logger and the Pi concurrently remains required; if it still fails, check the H10's two-receiver BLE setting and whether another app has occupied a slot.
