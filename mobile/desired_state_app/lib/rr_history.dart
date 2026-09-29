@@ -5,6 +5,7 @@ class RrHistory {
   final List<double> _raw = [];
   final List<double> _clean = [];
   final List<bool> _accepted = [];
+  final Set<int> _breaks = {};
   int _artifactCount = 0;
 
   List<double> get raw => List.unmodifiable(_raw);
@@ -57,7 +58,7 @@ class RrHistory {
     for (var i = start; i < _raw.length; i++) {
       if (!_accepted[i]) continue;
       acceptedCount++;
-      if (i > start && _accepted[i - 1]) {
+      if (i > start && _accepted[i - 1] && !_breaks.contains(i)) {
         final difference = _raw[i] - _raw[i - 1];
         sumSquares += difference * difference;
         pairs++;
@@ -66,10 +67,14 @@ class RrHistory {
     return acceptedCount >= 3 && pairs > 0 ? sqrt(sumSquares / pairs) : null;
   }
 
+  /// A recording pause is not a successive heartbeat pair.
+  void breakSequence() => _breaks.add(_raw.length);
+
   void clear() {
     _raw.clear();
     _clean.clear();
     _accepted.clear();
+    _breaks.clear();
     _artifactCount = 0;
   }
 }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
@@ -58,15 +59,22 @@ class _CollectorScreenState extends State<CollectorScreen> {
   double? _latestRr;
   double? _rmssd;
   String? _polarId;
-  String? _sessionId;
   RecordingState _recordingState = RecordingState.stopped;
   bool _exporting = false;
+  DateTime? _sessionStartedAt;
+  DateTime _lastForegroundUpdate = DateTime.fromMillisecondsSinceEpoch(0);
+  _TimelineRange _timelineRange = _TimelineRange.minutes10;
 
   final RrHistory _rrHistory = RrHistory();
+  final List<_TimelinePoint> _timeline = [];
+  final List<DateTime> _eventTimes = [];
   final TextEditingController _participantNameController =
       TextEditingController();
   final TextEditingController _eventDescriptionController =
       TextEditingController();
+  final TextEditingController _sessionDescriptionController =
+      TextEditingController();
+  final TextEditingController _outcomeController = TextEditingController();
   SessionLogger? _sessionLogger;
   SessionLogger? _lastSessionLogger;
   final RecordingForegroundService _foregroundService =
@@ -102,6 +110,26 @@ class _CollectorScreenState extends State<CollectorScreen> {
         );
       }
 
+      final rmssd = _recordingState == RecordingState.recording
+          ? _rrHistory.rmssd
+          : _rmssd;
+      if (_recordingState == RecordingState.recording) {
+        _timeline.add(
+          _TimelinePoint(
+            timestamp: data.timestamp,
+            heartRate: data.heartRate,
+            rmssd: rmssd,
+          ),
+        );
+        unawaited(
+          _updateForegroundNotification(
+            heartRate: data.heartRate,
+            rmssd: rmssd,
+            force: false,
+          ),
+        );
+      }
+
       setState(() {
         _heartRate = data.heartRate;
 
@@ -110,7 +138,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
         }
 
         if (_recordingState == RecordingState.recording) {
-          _rmssd = _rrHistory.rmssd;
+          _rmssd = rmssd;
         }
       });
     });
@@ -233,6 +261,8 @@ class _CollectorScreenState extends State<CollectorScreen> {
     _polar.dispose();
     _participantNameController.dispose();
     _eventDescriptionController.dispose();
+    _sessionDescriptionController.dispose();
+    _outcomeController.dispose();
     super.dispose();
   }
 
@@ -254,7 +284,10 @@ class _CollectorScreenState extends State<CollectorScreen> {
       description: _eventDescriptionController.text,
     );
     if (!mounted) return;
-    setState(_eventDescriptionController.clear);
+    setState(() {
+      _eventTimes.add(DateTime.now());
+      _eventDescriptionController.clear();
+    });
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Event saved to this session log.')),
     );
@@ -268,6 +301,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
         polarId: polarId,
         deviceName: _deviceName,
         participantName: _participantName(),
+        description: _sessionDescriptionController.text,
       );
       await _foregroundService.start(logger.sessionId);
       if (!mounted) {
@@ -277,9 +311,12 @@ class _CollectorScreenState extends State<CollectorScreen> {
       }
       setState(() {
         _rrHistory.clear();
+        _timeline.clear();
+        _eventTimes.clear();
         _rmssd = null;
+        _sessionStartedAt = DateTime.now();
+        _lastForegroundUpdate = DateTime.fromMillisecondsSinceEpoch(0);
         _sessionLogger = logger;
-        _sessionId = logger.sessionId;
         _recordingState = RecordingState.recording;
         _status = 'Recording';
       });
@@ -293,7 +330,8 @@ class _CollectorScreenState extends State<CollectorScreen> {
     final logger = _sessionLogger;
     if (logger == null || _recordingState != RecordingState.recording) return;
     await logger.writeEvent('session_paused');
-    await _foregroundService.stop();
+    _rrHistory.breakSequence();
+    await _updateForegroundNotification(force: true, state: 'Paused');
     if (!mounted) return;
     setState(() {
       _recordingState = RecordingState.paused;
@@ -304,8 +342,9 @@ class _CollectorScreenState extends State<CollectorScreen> {
   Future<void> _resumeSession() async {
     final logger = _sessionLogger;
     if (logger == null || _recordingState != RecordingState.paused) return;
-    await _foregroundService.start(logger.sessionId);
+    _rrHistory.breakSequence();
     await logger.writeEvent('session_resumed');
+    await _updateForegroundNotification(force: true, state: 'Recording');
     if (!mounted) return;
     setState(() {
       _recordingState = RecordingState.recording;
@@ -325,6 +364,144 @@ class _CollectorScreenState extends State<CollectorScreen> {
       _recordingState = RecordingState.stopped;
       _status = _connected ? 'Session saved' : _status;
     });
+  }
+
+  Future<void> _showSessionSetup() async {
+    if (!_connected) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          20,
+          20,
+          20 + MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Start session',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _participantNameController,
+              decoration: const InputDecoration(labelText: 'Participant name'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _sessionDescriptionController,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: 'Session description',
+                hintText: 'Optional context or intention',
+              ),
+            ),
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: () async {
+                Navigator.pop(context);
+                await _startSession();
+              },
+              child: const Text('START RECORDING'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showEventNote() async {
+    _eventDescriptionController.clear();
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          20,
+          20,
+          20 + MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Mark event', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _eventDescriptionController,
+              autofocus: true,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: 'Note',
+                hintText: 'Optional event description',
+              ),
+            ),
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: () async {
+                Navigator.pop(context);
+                await _markEvent();
+              },
+              child: const Text('SAVE EVENT'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showFinishSession() async {
+    final logger = _sessionLogger;
+    if (logger == null) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          20,
+          20,
+          20 + MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Finish session',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _outcomeController,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: 'Outcome / after-state',
+                hintText: 'Optional notes',
+              ),
+            ),
+            const SizedBox(height: 16),
+            FilledButton.tonal(
+              onPressed: () async {
+                final outcome = _outcomeController.text;
+                if (outcome.trim().isNotEmpty) {
+                  await logger.writeEvent(
+                    'session_outcome',
+                    description: outcome,
+                  );
+                }
+                _outcomeController.clear();
+                if (context.mounted) Navigator.pop(context);
+                await _stopSession();
+              },
+              child: const Text('SAVE SESSION'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _exportLastSession() async {
@@ -351,229 +528,224 @@ class _CollectorScreenState extends State<CollectorScreen> {
     }
   }
 
+  Duration get _sessionElapsed {
+    final startedAt = _sessionStartedAt;
+    if (startedAt == null) return Duration.zero;
+    return DateTime.now().difference(startedAt);
+  }
+
+  Future<void> _updateForegroundNotification({
+    int? heartRate,
+    double? rmssd,
+    String? state,
+    required bool force,
+  }) async {
+    if (_sessionLogger == null) return;
+    final now = DateTime.now();
+    if (!force &&
+        now.difference(_lastForegroundUpdate) < const Duration(seconds: 5)) {
+      return;
+    }
+    _lastForegroundUpdate = now;
+    await _foregroundService.update(
+      state:
+          state ??
+          (_recordingState == RecordingState.paused ? 'Paused' : 'Recording'),
+      heartRate: heartRate ?? _heartRate,
+      rmssd: rmssd ?? _rmssd,
+      artifactCount: _rrHistory.artifactCount,
+      elapsed: _sessionElapsed,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Desired State')),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(20),
+    return Scaffold(body: SafeArea(child: _buildScreen(context)));
+  }
+
+  Widget _buildScreen(BuildContext context) {
+    if (_recordingState == RecordingState.recording ||
+        _recordingState == RecordingState.paused) {
+      return _buildDashboard(context);
+    }
+    if (_lastSessionLogger != null) return _buildCompleted(context);
+    return _buildConnect(context);
+  }
+
+  Widget _buildConnect(BuildContext context) => ListView(
+    padding: const EdgeInsets.all(20),
+    children: [
+      Text('Desired State', style: Theme.of(context).textTheme.headlineSmall),
+      const SizedBox(height: 4),
+      Text(_status),
+      const SizedBox(height: 24),
+      if (_connected) ...[
+        _deviceLine(),
+        const SizedBox(height: 20),
+        FilledButton.icon(
+          onPressed: _showSessionSetup,
+          icon: const Icon(Icons.play_arrow),
+          label: const Text('START RECORDING'),
+        ),
+        TextButton(onPressed: _disconnect, child: const Text('Disconnect')),
+      ] else ...[
+        FilledButton.icon(
+          onPressed: _scanning ? null : _scan,
+          icon: const Icon(Icons.bluetooth_searching),
+          label: Text(_scanning ? 'Scanning…' : 'Scan for Polar H10'),
+        ),
+        for (final result in _scanResults)
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.monitor_heart),
+              title: Text(
+                result.device.platformName.isEmpty
+                    ? 'Polar / BLE device'
+                    : result.device.platformName,
+              ),
+              subtitle: Text(result.device.remoteId.str),
+              onTap: _connecting ? null : () => _connect(result),
+            ),
+          ),
+      ],
+    ],
+  );
+
+  Widget _buildDashboard(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+    child: Column(
+      children: [
+        Row(
           children: [
+            Expanded(
+              child: Text(
+                '${_participantName()} · $_deviceName',
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.labelMedium,
+              ),
+            ),
+            Icon(
+              Icons.circle,
+              size: 10,
+              color: _recordingState == RecordingState.recording
+                  ? Colors.red
+                  : Colors.amber,
+            ),
+            const SizedBox(width: 4),
             Text(
-              'Polar H10 Collector',
-              style: Theme.of(context).textTheme.headlineMedium,
+              _recordingState == RecordingState.recording ? 'REC' : 'PAUSED',
             ),
-            const SizedBox(height: 8),
-            Text(_status),
-            if (_sessionId != null) ...[
-              const SizedBox(height: 4),
-              Text('Session: $_sessionId'),
-            ],
-            const SizedBox(height: 24),
-
-            TextField(
-              controller: _participantNameController,
-              enabled: _sessionLogger == null,
-              textInputAction: TextInputAction.done,
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
-                labelText: 'Participant name',
-                helperText: 'Saved with the H10 ID for this session.',
-              ),
+            const SizedBox(width: 8),
+            Text(_formatDuration(_sessionElapsed)),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
+          children: [
+            _Metric(
+              label: 'HR',
+              value: _heartRate?.toString() ?? '--',
+              unit: 'bpm',
             ),
-
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  children: [
-                    Text(
-                      _deviceName,
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 20),
-
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        _Metric(
-                          label: 'Heart Rate',
-                          value: _heartRate?.toString() ?? '--',
-                          unit: 'bpm',
-                        ),
-                        _Metric(
-                          label: 'RR',
-                          value: _latestRr == null
-                              ? '--'
-                              : _latestRr!.toStringAsFixed(0),
-                          unit: 'ms',
-                        ),
-                        _Metric(
-                          label: 'RMSSD (clean)',
-                          value: _rmssd == null
-                              ? '--'
-                              : _rmssd!.toStringAsFixed(1),
-                          unit: 'ms',
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
+            _Metric(
+              label: 'RMSSD',
+              value: _rmssd?.toStringAsFixed(1) ?? '--',
+              unit: 'ms',
             ),
-
-            const SizedBox(height: 20),
-
-            if (!_connected)
-              FilledButton.icon(
-                onPressed: _scanning ? null : _scan,
-                icon: _scanning
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.bluetooth_searching),
-                label: Text(_scanning ? 'Scanning...' : 'Scan for Polar H10'),
-              ),
-
-            if (_connected)
-              OutlinedButton.icon(
-                onPressed: _disconnect,
-                icon: const Icon(Icons.bluetooth_disabled),
-                label: const Text('Disconnect'),
-              ),
-
-            if (_connected) ...[
-              const SizedBox(height: 12),
-              if (_recordingState == RecordingState.stopped)
-                FilledButton.icon(
-                  onPressed: _startSession,
-                  icon: const Icon(Icons.play_arrow),
-                  label: const Text('START RECORDING'),
-                ),
-              if (_recordingState == RecordingState.recording)
-                Row(
-                  children: [
-                    Expanded(
-                      child: FilledButton.tonalIcon(
-                        onPressed: _pauseSession,
-                        icon: const Icon(Icons.pause),
-                        label: const Text('PAUSE'),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: FilledButton.tonalIcon(
-                        onPressed: _stopSession,
-                        icon: const Icon(Icons.stop),
-                        label: const Text('STOP & SAVE'),
-                      ),
-                    ),
-                  ],
-                ),
-              if (_recordingState == RecordingState.paused)
-                Row(
-                  children: [
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: _resumeSession,
-                        icon: const Icon(Icons.play_arrow),
-                        label: const Text('CONTINUE'),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: FilledButton.tonalIcon(
-                        onPressed: _stopSession,
-                        icon: const Icon(Icons.stop),
-                        label: const Text('STOP & SAVE'),
-                      ),
-                    ),
-                  ],
-                ),
-            ],
-
-            if (_lastSessionLogger != null && _sessionLogger == null) ...[
-              const SizedBox(height: 12),
-              FilledButton.tonalIcon(
-                onPressed: _exporting ? null : _exportLastSession,
-                icon: _exporting
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.ios_share),
-                label: Text(
-                  _exporting
-                      ? 'PREPARING EXPORT...'
-                      : 'SHARE COMPLETED SESSION',
-                ),
-              ),
-            ],
-
-            const SizedBox(height: 24),
-
-            if (_scanResults.isNotEmpty && !_connected) ...[
-              Text('Devices', style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 8),
-
-              for (final result in _scanResults)
-                Card(
-                  child: ListTile(
-                    leading: const Icon(Icons.monitor_heart),
-                    title: Text(
-                      result.device.platformName.isEmpty
-                          ? 'Polar / BLE device'
-                          : result.device.platformName,
-                    ),
-                    subtitle: Text(
-                      '${result.device.remoteId.str}   RSSI ${result.rssi}',
-                    ),
-                    trailing: _connecting
-                        ? const CircularProgressIndicator()
-                        : const Icon(Icons.chevron_right),
-                    onTap: _connecting ? null : () => _connect(result),
-                  ),
-                ),
-            ],
-
-            const SizedBox(height: 32),
-
-            TextField(
-              controller: _eventDescriptionController,
-              enabled: _connected,
-              maxLines: 2,
-              textInputAction: TextInputAction.done,
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
-                labelText: 'Event description',
-                hintText: 'Example: began slow breathing',
-              ),
-            ),
-            const SizedBox(height: 12),
-            FilledButton.tonalIcon(
-              onPressed: _recordingState == RecordingState.recording
-                  ? _markEvent
-                  : null,
-              icon: const Icon(Icons.flag),
-              label: const Text('MARK EVENT'),
-            ),
-
-            const SizedBox(height: 12),
-
-            Text(
-              'Raw RR this session: ${_rrHistory.rawCount}\n'
-              'Accepted RR: ${_rrHistory.cleanCount}\n'
-              'Artifacts rejected: ${_rrHistory.artifactCount}',
-              textAlign: TextAlign.center,
+            _Metric(
+              label: 'RR',
+              value: _latestRr?.toStringAsFixed(0) ?? '--',
+              unit: 'ms',
             ),
           ],
         ),
-      ),
-    );
-  }
+        Text(
+          'Good signal · ${_rrHistory.artifactCount} artifacts · Connected',
+          style: Theme.of(context).textTheme.labelSmall,
+        ),
+        const SizedBox(height: 8),
+        Expanded(
+          child: _TimelineCard(
+            points: _timeline,
+            eventTimes: _eventTimes,
+            sessionStartedAt: _sessionStartedAt,
+            range: _timelineRange,
+            onRangeChanged: (value) => setState(() => _timelineRange = value),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: GestureDetector(
+                onLongPress: _showEventNote,
+                child: FilledButton.icon(
+                  onPressed: _markEvent,
+                  icon: const Icon(Icons.flag),
+                  label: const Text('MARK EVENT'),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            if (_recordingState == RecordingState.recording)
+              FilledButton.tonal(
+                onPressed: _pauseSession,
+                child: const Text('Pause'),
+              )
+            else
+              FilledButton(
+                onPressed: _resumeSession,
+                child: const Text('Continue'),
+              ),
+            const SizedBox(width: 8),
+            IconButton.filledTonal(
+              onPressed: _showFinishSession,
+              icon: const Icon(Icons.stop),
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+
+  Widget _buildCompleted(BuildContext context) => Padding(
+    padding: const EdgeInsets.all(20),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('Session saved', style: Theme.of(context).textTheme.headlineSmall),
+        const SizedBox(height: 8),
+        Text(
+          '${_timeline.length} updates · ${_eventTimes.length} events · ${_rrHistory.artifactCount} artifacts',
+        ),
+        const Spacer(),
+        FilledButton.tonalIcon(
+          onPressed: _exporting ? null : _exportLastSession,
+          icon: const Icon(Icons.ios_share),
+          label: Text(_exporting ? 'PREPARING…' : 'SHARE SESSION'),
+        ),
+        const SizedBox(height: 8),
+        FilledButton(
+          onPressed: _connected ? _showSessionSetup : null,
+          child: const Text('NEW SESSION'),
+        ),
+        TextButton(onPressed: _disconnect, child: const Text('Disconnect')),
+      ],
+    ),
+  );
+
+  Widget _deviceLine() => Row(
+    children: [
+      const Icon(Icons.monitor_heart),
+      const SizedBox(width: 8),
+      Expanded(child: Text(_deviceName)),
+      const Icon(Icons.check_circle, color: Colors.green),
+    ],
+  );
+
+  String _formatDuration(Duration value) =>
+      '${value.inHours.toString().padLeft(2, '0')}:${(value.inMinutes % 60).toString().padLeft(2, '0')}:${(value.inSeconds % 60).toString().padLeft(2, '0')}';
 }
 
 enum RecordingState { stopped, recording, paused }
@@ -596,4 +768,298 @@ class _Metric extends StatelessWidget {
       ],
     );
   }
+}
+
+enum _TimelineRange { minutes2, minutes10, minutes30, hour, all }
+
+class _TimelinePoint {
+  const _TimelinePoint({
+    required this.timestamp,
+    required this.heartRate,
+    required this.rmssd,
+  });
+
+  final DateTime timestamp;
+  final int heartRate;
+  final double? rmssd;
+}
+
+class _TimelineCard extends StatelessWidget {
+  const _TimelineCard({
+    required this.points,
+    required this.eventTimes,
+    required this.sessionStartedAt,
+    required this.range,
+    required this.onRangeChanged,
+  });
+
+  final List<_TimelinePoint> points;
+  final List<DateTime> eventTimes;
+  final DateTime? sessionStartedAt;
+  final _TimelineRange range;
+  final ValueChanged<_TimelineRange> onRangeChanged;
+
+  Duration? get _duration => switch (range) {
+    _TimelineRange.minutes2 => const Duration(minutes: 2),
+    _TimelineRange.minutes10 => const Duration(minutes: 10),
+    _TimelineRange.minutes30 => const Duration(minutes: 30),
+    _TimelineRange.hour => const Duration(hours: 1),
+    _TimelineRange.all => null,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final sessionStart = sessionStartedAt ?? now;
+    final duration = _duration;
+    final requestedStart = duration == null
+        ? sessionStart
+        : now.subtract(duration);
+    final chartStart = requestedStart.isAfter(sessionStart)
+        ? requestedStart
+        : sessionStart;
+    final visiblePoints = points
+        .where((point) => !point.timestamp.isBefore(chartStart))
+        .toList(growable: false);
+    final chartEnd = visiblePoints.isEmpty ? now : visiblePoints.last.timestamp;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  'Session timeline',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const Spacer(),
+                const Icon(Icons.show_chart, size: 20),
+              ],
+            ),
+            const SizedBox(height: 8),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: SegmentedButton<_TimelineRange>(
+                segments: const [
+                  ButtonSegment(
+                    value: _TimelineRange.minutes2,
+                    label: Text('2 min'),
+                  ),
+                  ButtonSegment(
+                    value: _TimelineRange.minutes10,
+                    label: Text('10 min'),
+                  ),
+                  ButtonSegment(
+                    value: _TimelineRange.minutes30,
+                    label: Text('30 min'),
+                  ),
+                  ButtonSegment(
+                    value: _TimelineRange.hour,
+                    label: Text('1 hr'),
+                  ),
+                  ButtonSegment(value: _TimelineRange.all, label: Text('All')),
+                ],
+                selected: {range},
+                onSelectionChanged: (selection) =>
+                    onRangeChanged(selection.first),
+                showSelectedIcon: false,
+              ),
+            ),
+            const SizedBox(height: 12),
+            LayoutBuilder(
+              builder: (context, constraints) => SizedBox(
+                height: 190,
+                width: double.infinity,
+                child: InteractiveViewer(
+                  constrained: false,
+                  minScale: 1,
+                  maxScale: 12,
+                  boundaryMargin: const EdgeInsets.all(100),
+                  child: SizedBox(
+                    width: constraints.maxWidth,
+                    height: 190,
+                    child: CustomPaint(
+                      painter: _SessionTimelinePainter(
+                        points: visiblePoints,
+                        eventTimes: eventTimes,
+                        start: chartStart,
+                        end: chartEnd.isAfter(chartStart) ? chartEnd : now,
+                        colorScheme: Theme.of(context).colorScheme,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Text('Pinch to zoom · drag to pan · blue HR / green RMSSD'),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SessionTimelinePainter extends CustomPainter {
+  const _SessionTimelinePainter({
+    required this.points,
+    required this.eventTimes,
+    required this.start,
+    required this.end,
+    required this.colorScheme,
+  });
+
+  final List<_TimelinePoint> points;
+  final List<DateTime> eventTimes;
+  final DateTime start;
+  final DateTime end;
+  final ColorScheme colorScheme;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final plot = Rect.fromLTWH(34, 8, size.width - 68, size.height - 24);
+    final gridPaint = Paint()
+      ..color = colorScheme.outlineVariant
+      ..strokeWidth = 1;
+    for (var fraction = 0.0; fraction <= 1.0; fraction += .25) {
+      final y = plot.top + plot.height * fraction;
+      canvas.drawLine(Offset(plot.left, y), Offset(plot.right, y), gridPaint);
+    }
+    final milliseconds = math.max(1, end.difference(start).inMilliseconds);
+    double x(DateTime timestamp) =>
+        plot.left +
+        (timestamp.difference(start).inMilliseconds / milliseconds).clamp(
+              0.0,
+              1.0,
+            ) *
+            plot.width;
+    final eventPaint = Paint()
+      ..color = colorScheme.tertiary.withValues(alpha: .75)
+      ..strokeWidth = 1.5;
+    for (final timestamp in eventTimes) {
+      if (timestamp.isBefore(start) || timestamp.isAfter(end)) continue;
+      canvas.drawLine(
+        Offset(x(timestamp), plot.top),
+        Offset(x(timestamp), plot.bottom),
+        eventPaint,
+      );
+    }
+    _drawSeries(
+      canvas,
+      plot,
+      points
+          .map((point) => (point.timestamp, point.heartRate.toDouble()))
+          .toList(),
+      x,
+      colorScheme.primary,
+    );
+    _drawSeries(
+      canvas,
+      plot,
+      [
+        for (final point in points)
+          if (point.rmssd != null) (point.timestamp, point.rmssd!),
+      ],
+      x,
+      colorScheme.tertiary,
+    );
+    _axisLabels(
+      canvas,
+      size,
+      points.map((point) => point.heartRate.toDouble()).toList(),
+      points
+          .where((point) => point.rmssd != null)
+          .map((point) => point.rmssd!)
+          .toList(),
+    );
+    final label = '${_formatTime(start)} – ${_formatTime(end)}';
+    final text = TextPainter(
+      text: TextSpan(
+        text: label,
+        style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 11),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: size.width);
+    text.paint(canvas, Offset(0, size.height - text.height));
+  }
+
+  void _axisLabels(
+    Canvas canvas,
+    Size size,
+    List<double> heartRates,
+    List<double> rmssd,
+  ) {
+    void label(String text, Offset offset, Color color) {
+      final painter = TextPainter(
+        text: TextSpan(
+          text: text,
+          style: TextStyle(fontSize: 10, color: color),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      painter.paint(canvas, offset);
+    }
+
+    if (heartRates.isNotEmpty) {
+      label(
+        '${heartRates.reduce(math.max).round()}',
+        const Offset(0, 8),
+        colorScheme.primary,
+      );
+      label(
+        '${heartRates.reduce(math.min).round()}',
+        Offset(0, size.height - 34),
+        colorScheme.primary,
+      );
+    }
+    if (rmssd.isNotEmpty) {
+      final high = rmssd.reduce(math.max).toStringAsFixed(0);
+      final low = rmssd.reduce(math.min).toStringAsFixed(0);
+      label(high, Offset(size.width - 30, 8), colorScheme.tertiary);
+      label(
+        low,
+        Offset(size.width - 30, size.height - 34),
+        colorScheme.tertiary,
+      );
+    }
+  }
+
+  void _drawSeries(
+    Canvas canvas,
+    Rect plot,
+    List<(DateTime, double)> values,
+    double Function(DateTime) x,
+    Color color,
+  ) {
+    if (values.length < 2) return;
+    final low = values.map((value) => value.$2).reduce(math.min);
+    final high = values.map((value) => value.$2).reduce(math.max);
+    final span = math.max(1.0, high - low);
+    final path = Path();
+    for (var index = 0; index < values.length; index++) {
+      final value = values[index];
+      final y = plot.bottom - ((value.$2 - low) / span) * plot.height;
+      final point = Offset(x(value.$1), y);
+      if (index == 0) {
+        path.moveTo(point.dx, point.dy);
+      } else {
+        path.lineTo(point.dx, point.dy);
+      }
+    }
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2,
+    );
+  }
+
+  String _formatTime(DateTime value) =>
+      '${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}';
+
+  @override
+  bool shouldRepaint(covariant _SessionTimelinePainter oldDelegate) => true;
 }

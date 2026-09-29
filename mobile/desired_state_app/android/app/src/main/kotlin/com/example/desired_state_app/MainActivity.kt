@@ -18,7 +18,20 @@ class MainActivity : FlutterActivity() {
                             return@setMethodCallHandler
                         }
                         val intent = Intent(this, RecordingService::class.java)
+                            .setAction(RecordingService.ACTION_START)
                             .putExtra(RecordingService.SESSION_ID, sessionId)
+                            .putExtra(RecordingService.STATE, call.argument<String>("state") ?: "Recording")
+                        startForegroundService(intent)
+                        result.success(null)
+                    }
+                    "update" -> {
+                        val intent = Intent(this, RecordingService::class.java)
+                            .setAction(RecordingService.ACTION_UPDATE)
+                            .putExtra(RecordingService.STATE, call.argument<String>("state") ?: "Recording")
+                            .putExtra(RecordingService.HEART_RATE, call.argument<Int>("heartRate"))
+                            .putExtra(RecordingService.RMSSD, call.argument<Double>("rmssd"))
+                            .putExtra(RecordingService.ARTIFACT_COUNT, call.argument<Int>("artifactCount") ?: 0)
+                            .putExtra(RecordingService.ELAPSED_SECONDS, call.argument<Int>("elapsedSeconds") ?: 0)
                         startForegroundService(intent)
                         result.success(null)
                     }

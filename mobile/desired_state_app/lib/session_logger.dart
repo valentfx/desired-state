@@ -27,6 +27,7 @@ class SessionLogger {
     required String polarId,
     required String deviceName,
     required String participantName,
+    String description = '',
     Future<Directory> Function()? directoryProvider,
     DateTime? startedAt,
   }) async {
@@ -49,6 +50,8 @@ class SessionLogger {
       'schema_version': 1,
       'session_id': id,
       'source': 'desired_state_flutter',
+      'description': description.trim(),
+      'rr_processing': 'mobile-median9-25pct-300-2000-v1',
       'assignments': {polarId.toUpperCase(): participantName},
       'devices': {
         polarId.toUpperCase(): {
@@ -101,14 +104,14 @@ class SessionLogger {
     });
   }
 
-  Future<void> writeEvent(String event, {String? description}) {
+  Future<void> writeEvent(String event, {String? description, DateTime? receivedAt}) {
     return _enqueue(
       () => _appendJsonl('events', {
         'session_id': sessionId,
         'polar_id': polarId,
         'user_id': participantName,
         'event': event,
-        'received_utc': DateTime.now().toUtc().toIso8601String(),
+        'received_utc': (receivedAt ?? DateTime.now()).toUtc().toIso8601String(),
         if (description != null && description.trim().isNotEmpty)
           'description': description.trim(),
       }),

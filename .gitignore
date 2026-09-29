@@ -3,4 +3,6 @@ __pycache__/
 *.pyc
 .pytest_cache/
 sessions/
+desired_state_sessions/
+desired_state_exports/
 *.egg-info/
