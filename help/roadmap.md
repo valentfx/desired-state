@@ -1,6 +1,6 @@
 # Desired State roadmap
 
-Reprioritized 2026-09-30: quick markers first, then History MVP. This order supersedes the earlier recovery/users-first plan. See [current-state.md](current-state.md), [app-development-plan.md](app-development-plan.md) and [project-log.md](project-log.md). Quick markers and History MVP are implemented; processing and plots is next. Later stages and phone validation remain pending except for the existing recovery checkpoint.
+Reprioritized 2026-09-30: quick markers first, then History MVP. This order supersedes the earlier recovery/users-first plan. See [current-state.md](current-state.md), [app-development-plan.md](app-development-plan.md) and [project-log.md](project-log.md). Quick markers, History MVP and the core configurable processing/plots scope are implemented; Users is next. Later stages and phone validation remain pending except for the existing recovery checkpoint.
 
 ## Existing recovery checkpoint: preserve
 
@@ -16,13 +16,13 @@ Local session discovery/search/reopening, events, raw/current-screened HR/RR/RMS
 
 Remaining device checks: restart/update, existing real recordings, keyboard/touch/inspection, re-export/share contents, History during H10 recording and long-session performance. Selected-session files currently load in memory; scalable analysis, multi-device history and import remain later work.
 
-## 3. Processing and plots - next
+## 3. Processing and plots - core software completed
 
-Expand the MVP comparison to configurable raw/range-only/artifact-screened analysis, RR bounds/deviation reference, windows and coverage gates. Choose metrics and improve plot interactions, colors and bounds; share processing between Live/History and record configuration/version changes. Address filter seed lock-in and sustained rate changes without replacing raw input. More advanced metrics/segment comparisons follow the usable history flow.
+Shared Live/History configurable analysis, persistent versioned defaults, raw/range/screened modes, bounds/deviation/reference/window/sample/pair/usable-fraction gates, prospective reference reset, metric selection and bounded follow/inspect controls are implemented. Acquisition flags and the fixed recording summary remain unchanged. Configuration changes and History applications are logged and exported. See [current-state.md](current-state.md) for the v2 contract and 51-test evidence.
 
-Completion: processing math, settings replay, missing-result/exclusion reporting, bounded viewport/inspection and recording during plot interaction. No ECG-verified NN or physiological-state claim from RR screening alone.
+Pending device checks: preferences across phone restart/update, keyboard/touch behavior while recording, frozen/return-to-live plots, configuration export and long-session performance. Follow-up features: elapsed-time coverage (current gate is usable sample fraction), fixed Y bounds, desktop hover/wheel, historical configuration picker, segment comparisons and memory/UI-isolate scaling. No ECG-verified NN or physiological-state claim from RR screening alone.
 
-## 4. Users
+## 4. Users - next
 
 Persistent profiles, stable user IDs, defaults/preferred strap assignments and history filtering by user/device. Preserve historical assignment snapshots when profiles change. Existing participant information supports stages 1-3; simultaneous collection remains separate.
 

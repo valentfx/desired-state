@@ -4,6 +4,7 @@ import 'package:share_plus/share_plus.dart';
 import 'history_plot.dart';
 import 'session_controller.dart';
 import 'session_history.dart';
+import 'processing_screen.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key, required this.controller, this.repository});
@@ -220,6 +221,32 @@ class _HistoryDetailScreenState extends State<HistoryDetailScreen> {
       title: const Text('Session history'),
       actions: [
         IconButton(
+          tooltip: 'Processing & plots',
+          icon: const Icon(Icons.tune),
+          onPressed: () async {
+            try {
+              final session = await _loading;
+              if (!context.mounted) return;
+              await Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => ProcessingScreen(
+                    controller: widget.controller,
+                    session: session,
+                    repository: widget.repository,
+                  ),
+                ),
+              );
+            } catch (e) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Could not open processing: $e')),
+                );
+              }
+            }
+          },
+        ),
+        IconButton(
           tooltip: 'Refresh session',
           onPressed: _reload,
           icon: const Icon(Icons.refresh),
@@ -333,7 +360,13 @@ class _HistoryDetailScreenState extends State<HistoryDetailScreen> {
                         ))
                           ListTile(
                             title: Text(
-                              '${event['marker_label'] ?? event['description'] ?? event['event'] ?? 'Event'}',
+                              event['event'] ==
+                                      'processing_configuration_initial'
+                                  ? 'Initial analysis settings'
+                                  : event['event'] ==
+                                        'processing_configuration_changed'
+                                  ? 'Analysis settings changed'
+                                  : '${event['marker_label'] ?? event['description'] ?? event['event'] ?? 'Event'}',
                             ),
                             subtitle: Text(
                               '${event['received_utc'] ?? 'Unknown time'} · ${event['event']}\n${entry.metadata.eventNotes[entry.eventId(event)] ?? ''}',
@@ -369,7 +402,7 @@ class _HistoryDetailScreenState extends State<HistoryDetailScreen> {
                       }),
                     ),
                     const Text(
-                      'Current screen: 300–2000 ms, median of 9 accepted RR, 25% deviation. RMSSD: latest 60 acquired RR, at least 3 usable values and 1 contiguous pair. Raw RMSSD excludes nonpositive values only. Pauses/gaps break pairs. Provisional, not ECG-verified NN.',
+                      'Fixed v1 comparison (configurable analysis: tune button above). Current screen: 300–2000 ms, median of 9 accepted RR, 25% deviation. RMSSD: latest 60 acquired RR, at least 3 usable values and 1 contiguous pair. Raw RMSSD excludes nonpositive values only. Pauses/gaps break pairs. Provisional, not ECG-verified NN.',
                     ),
                     Text(
                       '${session.rr.length} raw RR · ${session.rr.where((r) => !r.accepted).length} excluded by current screen. HR is reported by the device and is unchanged by this selector.',

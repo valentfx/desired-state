@@ -11,11 +11,19 @@ Android app for single-Polar-H10 HR/RR recording, persistent quick markers and l
 
 Current screening is provisional, not ECG-verified NN classification. It uses 300–2000 ms and 25% deviation from the median of up to nine accepted RR intervals. RMSSD uses the latest 60 acquired readable intervals, at least three usable values and one adjacent pair. Rejected intervals and gaps break pairs; receipt timestamps are not exact beat times. Raw data and originally recorded screening flags are never replaced by this comparison.
 
+## Configurable processing and plots
+
+Use the **Processing & plots** tune button on Live or History detail, then **Processing settings**. Choose Raw, Range only or Artifact screened; RR bounds, deviation/reference, window seconds, minimum samples/pairs and usable RR percentage; and HR/RR/RMSSD/SDNN/pNN50/lnRMSSD plots. Apply saves defaults shared across Live/History and recomputes the derived view. The original Live summary/notification and History comparison retain fixed-v1 screening; recorded flags never change.
+
+The new `rr-configurable-v2` method restarts warm-up/reference after gaps and can reset its reference prospectively after a sustained cluster of in-range deviations. Rejected earlier RR remain excluded. Usable percentage counts accepted samples, not elapsed-time coverage. Missing/undefined values remain unavailable. Use 30/60/300-second or All presets, a bounded range slider, tap inspection and Back to live / Fit data; acquisition continues while inspecting a frozen interval.
+
+Settings live in `desired_state_settings/processing.json`. Open sessions log initial/changed configurations; applying settings in stopped History appends `processing_views.jsonl`, included in exports. Do not equate experimental screening or HRV changes with clinical/psychological conclusions. Large-session responsiveness and phone behavior still require validation.
+
 ## Storage and compatibility
 
 App documents contain `desired_state_sessions/<session_id>/` with schema-1 manifest and JSONL event/HR/RR files. Optional `marker_notes.jsonl` and `history_edits.jsonl` retain annotations without rewriting originals. History edits include previous/new values and edit UTC; old readers continue to see original metadata. Exports include both journals. Custom buttons live in `desired_state_settings/quick_markers.json`.
 
-Older single-device sessions and readable portions of interrupted logs can be reviewed with warnings. Unknown manifest versions cannot be opened; damaged edit journals disable editing/export. History currently loads selected-session data into memory. External ZIP import, multiple devices, configurable processing, advanced comparisons and Windows parity are not implemented. App data survives ordinary updates, but not uninstall/data clearing.
+Older single-device sessions and readable portions of interrupted logs can be reviewed with warnings. Unknown manifest versions cannot be opened; damaged edit journals disable editing/export. History currently loads selected-session data into memory. External ZIP import, multiple devices, advanced comparisons, elapsed-time coverage and Windows parity are not implemented. App data survives ordinary updates, but not uninstall/data clearing.
 
 ## Development
 
@@ -33,4 +41,4 @@ flutter run --no-pub -d <device-id>
 
 APK: `build/app/outputs/flutter-apk/app-debug.apk`. Keep generated outputs and private recordings out of Git. On the work PC, a confirmed C:/F: Kotlin cache issue is worked around for the build command with `$env:GRADLE_OPTS = '-Dorg.gradle.project.kotlin.incremental=false'`; do not change global SDK settings.
 
-See [current state](../../help/current-state.md) for actual validation and phone/H10 checks, [roadmap](../../help/roadmap.md) for next work, and [repository guidance](../../AGENTS.md) before editing. Current next stage is configurable processing and plots; software tests do not establish background/Bluetooth hardware reliability.
+See [current state](../../help/current-state.md) for actual validation and phone/H10 checks, [roadmap](../../help/roadmap.md) for next work, and [repository guidance](../../AGENTS.md) before editing. Current next stage is persistent Users/profiles; software tests do not establish background/Bluetooth hardware reliability.

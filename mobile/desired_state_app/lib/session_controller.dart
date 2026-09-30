@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -9,6 +10,7 @@ import 'recording_foreground_service.dart';
 import 'rr_history.dart';
 import 'session_logger.dart';
 import 'quick_markers.dart';
+import 'processing.dart';
 
 enum RecordingState { stopped, recording, paused }
 
@@ -34,6 +36,7 @@ class SessionController extends ChangeNotifier {
     Duration tickInterval = const Duration(seconds: 1),
   }) : polar = service ?? PolarH10Service(),
        quickMarkers = QuickMarkerStore(directoryProvider: directoryProvider),
+       processing = ProcessingStore(directoryProvider: directoryProvider),
        _foreground = foregroundService ?? RecordingForegroundService() {
     assert(maxAttempts > 0 && staleAfter > Duration.zero);
     _dataSubscription = polar.dataStream.listen(_onData);
@@ -45,6 +48,22 @@ class SessionController extends ChangeNotifier {
 
   final PolarH10Service polar;
   final QuickMarkerStore quickMarkers;
+  final ProcessingStore processing;
+  final List<RrInput> analysisInputs = [];
+
+  Future<void> saveProcessing(ProcessingConfig config) async {
+    await processing.save(config);
+    final logger = sessionLogger;
+    if (logger != null) {
+      await logger.writeEvent(
+        'processing_configuration_changed',
+        description: jsonEncode(config.toJson()),
+        flush: true,
+      );
+    }
+    _changed();
+  }
+
   final List<RecordedMarker> recordedMarkers = [];
   final Map<String, List<String>> markerNotes = {};
   final RecordingForegroundService _foreground;
@@ -165,6 +184,7 @@ class SessionController extends ChangeNotifier {
       participant = participantName.trim().isEmpty
           ? 'unassigned'
           : participantName.trim();
+      await processing.load();
       opened = await SessionLogger.start(
         polarId: polarId!,
         deviceName: deviceName,
@@ -176,6 +196,15 @@ class SessionController extends ChangeNotifier {
         await opened.close();
         return;
       }
+      await opened.writeEvent(
+        'processing_configuration_initial',
+        description: jsonEncode(
+          processing.error == null
+              ? processing.config.toJson()
+              : {'settings_error': processing.error},
+        ),
+        flush: true,
+      );
       await _foreground.start(opened.sessionId);
       if (_disposed) {
         await opened.close();
@@ -186,6 +215,7 @@ class SessionController extends ChangeNotifier {
       _visibleSessionId = opened.sessionId;
       lastSessionLogger = null;
       rrHistory.clear();
+      analysisInputs.clear();
       timeline.clear();
       eventTimes.clear();
       recordedMarkers.clear();
@@ -237,6 +267,17 @@ class SessionController extends ChangeNotifier {
         _gap = false;
       }
       final samples = rrHistory.addAll(data.rrIntervalsMs);
+      for (final (index, sample) in samples.indexed) {
+        analysisInputs.add(
+          RrInput(
+            data.timestamp,
+            sample.rrMs,
+            _segment,
+            packetIndex: index,
+            recordedAccepted: sample.accepted,
+          ),
+        );
+      }
       rmssd = rrHistory.rmssd;
       timeline.add(
         TimelinePoint(data.timestamp, data.heartRate, rmssd, _segment),

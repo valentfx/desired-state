@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'rr_history.dart';
 import 'session_archive.dart';
+import 'processing.dart';
 
 typedef JsonRow = Map<String, dynamic>;
 
@@ -450,6 +451,32 @@ class SessionHistoryRepository {
     final latest = await readEntry(entry.directory);
     await _checkWritable(latest);
     return exportSessionDirectory(entry.directory);
+  });
+
+  Future<void> recordProcessingView(
+    HistoryEntry entry,
+    ProcessingConfig config,
+  ) => _serial(() async {
+    config.validate();
+    await _checkWritable(await readEntry(entry.directory));
+    final file = File('${entry.directory.path}/processing_views.jsonl');
+    if (await FileSystemEntity.type(file.path, followLinks: false) ==
+        FileSystemEntityType.link) {
+      throw StateError('Linked processing journals are not supported');
+    }
+    final warnings = <String>[];
+    final previous = await _rows(entry.directory, 'processing_views', warnings);
+    if (warnings.isNotEmpty ||
+        previous.any(
+          (r) => r['schema_version'] != 1 || r['session_id'] != entry.id,
+        )) {
+      throw StateError('Unreadable processing journal; original preserved');
+    }
+    await file.writeAsString(
+      '${jsonEncode({'schema_version': 1, 'session_id': entry.id, 'viewed_utc': DateTime.now().toUtc().toIso8601String(), 'configuration': config.toJson()})}\n',
+      mode: FileMode.append,
+      flush: true,
+    );
   });
 }
 

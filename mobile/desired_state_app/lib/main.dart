@@ -10,6 +10,7 @@ import 'session_controller.dart';
 import 'session_logger.dart';
 import 'quick_marker_widgets.dart';
 import 'history_screen.dart';
+import 'processing_screen.dart';
 
 void main() {
   runApp(const DesiredStateApp());
@@ -347,6 +348,16 @@ class _CollectorScreenState extends State<CollectorScreen> {
       appBar: AppBar(
         title: const Text('Live'),
         actions: [
+          IconButton(
+            tooltip: 'Processing & plots',
+            icon: const Icon(Icons.tune),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute<void>(
+                builder: (_) => ProcessingScreen(controller: _controller),
+              ),
+            ),
+          ),
           TextButton.icon(
             onPressed: () => Navigator.push(
               context,
@@ -462,7 +473,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
                     unit: 'bpm',
                   ),
                   _Metric(
-                    label: 'RMSSD',
+                    label: 'RMSSD (fixed)',
                     value: _rmssd?.toStringAsFixed(1) ?? '--',
                     unit: 'ms',
                   ),
