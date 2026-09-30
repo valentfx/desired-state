@@ -2,8 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:archive/archive.dart';
 import 'package:path_provider/path_provider.dart';
+
+import 'session_archive.dart';
 
 class SessionLogger {
   SessionLogger._(
@@ -182,30 +183,7 @@ class SessionLogger {
   Future<File> createExportZip() async {
     await _writes;
     await _annotationWrites;
-    const fileNames = [
-      'manifest.json',
-      'events.jsonl',
-      'measurements.jsonl',
-      'rr.jsonl',
-      'marker_notes.jsonl',
-    ];
-    final archive = Archive();
-    for (final name in fileNames) {
-      final source = File('${directory.path}${Platform.pathSeparator}$name');
-      if (!await source.exists()) continue;
-      final bytes = await source.readAsBytes();
-      archive.addFile(ArchiveFile('$sessionId/$name', bytes.length, bytes));
-    }
-    final encoded = ZipEncoder().encodeBytes(archive);
-    final exportDirectory = Directory(
-      '${directory.parent.parent.path}${Platform.pathSeparator}desired_state_exports',
-    );
-    await exportDirectory.create(recursive: true);
-    final output = File(
-      '${exportDirectory.path}${Platform.pathSeparator}$sessionId.zip',
-    );
-    await output.writeAsBytes(encoded, flush: true);
-    return output;
+    return exportSessionDirectory(directory);
   }
 
   Future<void> _writeJson(String name, Map<String, dynamic> row) {

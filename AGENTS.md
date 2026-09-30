@@ -16,7 +16,7 @@
 - Packet receipt time is not an exact beat timestamp. RR-based screening is provisional, not ECG-verified NN classification or a complete psychological state measurement.
 - Keep local session files inspectable and portable. Version schema/processing changes and maintain compatibility deliberately.
 - `SessionController` is owned above navigation by the app. Screens observe it; they must not dispose it, own recording subscriptions, or reopen files during reconnect. Respect pause/stop/manual-disconnect intent. Preserve `continuity_segment` breaks when deriving RR pairs.
-- Quick-marker software is implemented. Next delivery priority: History MVP with raw/current-screened comparison, events and outcome notes; processing/plots, Users, and recovery hardening/feedback follow. Preserve recovery checkpoint `15caeee`. Read optional marker snapshots/IDs and `marker_notes.jsonl` alongside legacy events; do not rewrite raw rows or historical marker labels. Avoid a broad refactor or Users prerequisite before markers/history ship; include bounded plots, contrasting colors and keyboard-safe forms in touched screens.
+- Quick markers and History MVP are implemented. Next: versioned configurable processing shared by Live/History, then metric/plot settings, Users, and recovery hardening/feedback. Preserve recovery checkpoint `15caeee`. Read optional marker snapshots/IDs, `marker_notes.jsonl` and `history_edits.jsonl` alongside legacy events. History edits preserve originals, previous/new values and the marker-note watermark; do not rewrite raw rows or historical marker labels. Avoid a broad refactor or Users prerequisite before markers/history ship; include bounded plots, contrasting colors and keyboard-safe forms in touched screens.
 
 ## Code map and verification
 

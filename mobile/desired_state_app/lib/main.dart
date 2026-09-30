@@ -9,6 +9,7 @@ import 'rr_history.dart';
 import 'session_controller.dart';
 import 'session_logger.dart';
 import 'quick_marker_widgets.dart';
+import 'history_screen.dart';
 
 void main() {
   runApp(const DesiredStateApp());
@@ -342,7 +343,24 @@ class _CollectorScreenState extends State<CollectorScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(body: SafeArea(child: _buildScreen(context)));
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Live'),
+        actions: [
+          TextButton.icon(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute<void>(
+                builder: (_) => HistoryScreen(controller: _controller),
+              ),
+            ),
+            icon: const Icon(Icons.history),
+            label: const Text('History'),
+          ),
+        ],
+      ),
+      body: SafeArea(child: _buildScreen(context)),
+    );
   }
 
   Widget _buildScreen(BuildContext context) {

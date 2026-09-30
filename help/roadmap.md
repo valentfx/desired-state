@@ -1,6 +1,6 @@
 # Desired State roadmap
 
-Reprioritized 2026-09-30: quick markers first, then History MVP. This order supersedes the earlier recovery/users-first plan. See [current-state.md](current-state.md), [app-development-plan.md](app-development-plan.md) and [project-log.md](project-log.md). Quick-marker software is now implemented; History MVP is next. Later stages and phone validation remain pending except for the existing recovery checkpoint.
+Reprioritized 2026-09-30: quick markers first, then History MVP. This order supersedes the earlier recovery/users-first plan. See [current-state.md](current-state.md), [app-development-plan.md](app-development-plan.md) and [project-log.md](project-log.md). Quick markers and History MVP are implemented; processing and plots is next. Later stages and phone validation remain pending except for the existing recovery checkpoint.
 
 ## Existing recovery checkpoint: preserve
 
@@ -10,15 +10,13 @@ Commit `15caeee` already implements app-owned recording, manual Reconnect H10, b
 
 Persistent custom buttons, add/rename/remove/reorder, immutable event snapshots, optional later notes and annotation-aware export are implemented. See [current-state.md](current-state.md) for storage contracts and automated evidence. Remaining device checks: confirm labels/order after phone restart/update, repeated taps during H10 recording, note entry while recording/paused/after Stop, and exported annotations. This does not block History MVP.
 
-## 2. History MVP - next
+## 2. History MVP - software completed
 
-Prioritize finding a session, viewing its events and adding "what helped/how I felt" notes. List/open existing local sessions across restarts, using current participant/device metadata. Show HR/RR/RMSSD plots with event markers, gaps and timestamp/value inspection. Expose **raw versus current screened data immediately**, including excluded raw RR values, with explicit method/window labels. Preserve recorded flags and distinguish them from any current-method recomputation; raw rows never change and RR pairs never bridge gaps or exclusions.
+Local session discovery/search/reopening, events, raw/current-screened HR/RR/RMSSD plots, gap-aware value inspection, bounded time range, description/outcome/event notes and tags, append-only edit provenance, and annotation-aware re-export are implemented. Legacy and interrupted logs are covered by fixtures. Recording remains app-owned during History navigation. See [current-state.md](current-state.md) for storage contracts, 40-test evidence, compatibility limits and APK validation.
 
-Read existing marker event IDs/label snapshots and optional `marker_notes.jsonl`, while supporting older files without them. Edit descriptions, notes and outcome tags with originals/edit provenance retained. Re-export the selected session including annotations. Handle older files and incomplete/interrupted sessions explicitly. Do not require a full Users screen, configurable filters, advanced metrics, segment comparisons or automatic interpretation first. Use existing session files with deliberate compatible metadata extensions.
+Remaining device checks: restart/update, existing real recordings, keyboard/touch/inspection, re-export/share contents, History during H10 recording and long-session performance. Selected-session files currently load in memory; scalable analysis, multi-device history and import remain later work.
 
-Completion: old/new/incomplete-session fixtures; restart/list/open; known excluded RR visible in raw view; screened math and gap boundaries; event/value inspection; annotation persistence and export round-trip without raw changes. Include contrasting plot colors, bounded movement and keyboard-safe forms in this MVP.
-
-## 3. Processing and plots
+## 3. Processing and plots - next
 
 Expand the MVP comparison to configurable raw/range-only/artifact-screened analysis, RR bounds/deviation reference, windows and coverage gates. Choose metrics and improve plot interactions, colors and bounds; share processing between Live/History and record configuration/version changes. Address filter seed lock-in and sustained rate changes without replacing raw input. More advanced metrics/segment comparisons follow the usable history flow.
 
