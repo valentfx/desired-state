@@ -1,8 +1,8 @@
 # Desired State current state
 
-Last reconciled: 2026-09-30, stage 1 implementation following baseline `7e1c0f7`. Paths below are relative to the repository root.
+Last reconciled: 2026-09-30, recovery checkpoint `15caeee` and revised quick-markers-first priorities. Paths below are relative to the repository root.
 
-## Stage 1: implemented, awaiting hardware validation
+## Existing recovery checkpoint: implemented, awaiting hardware validation
 
 - The app owns `lib/session_controller.dart` above screen navigation. It owns the logger, participant snapshot, recording state, RR history, timeline, markers, subscriptions, watchdog and foreground notification updates. Screen removal/recreation does not end recording.
 - During an open session, **Reconnect H10** rebuilds the same selected device's connection and subscriptions. Automatic recovery runs on disconnect or ten seconds without a measurement. Each recovery cycle allows three attempts, with 2/4-second delays between failures. Each connected attempt must receive a measurement within ten seconds; a BLE connection alone is not success. After exhaustion, explicit Reconnect or Continue after pause permits another cycle.
@@ -21,7 +21,15 @@ Copied source/platform/configuration files into the authoritative F: checkout, e
 
 Recovered baseline: analysis passed and all nine tests passed before implementation. Stage 1: Dart formatting passed (11 files, final check unchanged), `flutter analyze --no-pub` reported no issues, and all 20 tests passed with `flutter test --no-pub`. `flutter build apk --debug --no-pub` succeeded with command-scoped `GRADLE_OPTS=-Dorg.gradle.project.kotlin.incremental=false` after a confirmed C:/F: Kotlin incremental-cache error. APK: `mobile/desired_state_app/build/app/outputs/flutter-apk/app-debug.apk` (ignored, not committed). See [project-log.md](project-log.md). No phone/H10 test has been performed for stage 1.
 
-**Next step:** install the debug APK on the S24 Ultra and record one identified session with markers before/after gaps. Test manual Reconnect, strap out-of-range/return, Bluetooth off/on, pause and stop during recovery, retry exhaustion followed by manual recovery, and 10–15 minutes with the screen locked/app backgrounded. Export the session and verify one ID/assignment, unchanged raw RR, gap events/segments, no duplicate packet callbacks and no paused/post-stop rows. Confirm notification status/age. Preserve backups until the recovered app is confirmed. Then begin persistent users and custom quick markers; do not start feedback rules yet.
+**Next implementation step:** persistent custom quick markers: add/remove/rename/reorder buttons, stable IDs and historical label snapshots, one-tap timestamped events without typing, optional notes afterward, and persistence across restart/update. Use the existing participant/session fields. Then ship History MVP before the full Users screen or larger restructuring.
+
+**History MVP requirements:** find/list/open existing saved sessions; HR/RR/RMSSD plots with event markers, gaps and value inspection; raw versus current screened data from the first version, including excluded raw RR values. Prioritize viewing events and adding "what helped/how I felt" notes, editable descriptions/notes/outcome tags and re-export with annotations while preserving raw files and edit provenance. Clearly distinguish recorded flags from any current-method recomputation and incomplete logs from completed sessions. Advanced metrics and automatic interpretation are later work.
+
+**Revised order:** 1. Quick markers; 2. History MVP; 3. Processing and plots; 4. Users; 5. Recovery hardening and feedback. These are planned deliverables, not implemented features. Retain the controller and manual/automatic recovery checkpoint. Include improved colors, bounded plots and keyboard-safe forms wherever those screens are touched; avoid a broad refactor before markers/history ship.
+
+**Outstanding hardware checks (not a prerequisite to marker/history implementation):** install the debug APK on the S24 Ultra and record one identified session with markers before/after gaps. Test manual Reconnect, strap out-of-range/return, Bluetooth off/on, pause and stop during recovery, exhaustion/manual retry, and 10-15 minutes locked/backgrounded. Export and verify one ID/assignment, unchanged raw RR, gap events/segments, no duplicate callbacks and no paused/post-stop rows. Confirm notification status/age. Fix demonstrated data-loss defects promptly; do not claim unattended reliability. Preserve backups until the recovered app is confirmed.
+
+This priority update changes documentation only. The recovery validation above is from the previous implementation; no new app tests/builds or hardware checks were run for this plan change.
 
 ## Direction and evidence
 

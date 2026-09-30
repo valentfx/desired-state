@@ -1,36 +1,46 @@
-﻿# Desired State roadmap
+# Desired State roadmap
 
-Updated 2026-09-30. Stage 1 software is implemented; phone/H10 validation remains pending. This is the agreed sequence, not a claim that later features exist. See [current-state.md](current-state.md), [app-development-plan.md](app-development-plan.md) and [project-log.md](project-log.md).
+Reprioritized 2026-09-30: quick markers first, then History MVP. This order supersedes the earlier recovery/users-first plan. See [current-state.md](current-state.md), [app-development-plan.md](app-development-plan.md) and [project-log.md](project-log.md). All five deliverables below remain planned except the explicitly identified recovery checkpoint.
 
-## 1. Validate recording ownership and Bluetooth recovery
+## Existing recovery checkpoint: preserve
 
-Completed software is documented in current state: app-owned SessionController, manual reconnect, disconnect/stale watchdog, bounded retries, cancellation, status/age, event logging and RR continuity segments.
+Commit `15caeee` already implements app-owned recording, manual Reconnect H10, bounded automatic recovery, stale-data detection, subscription cancellation, status/age and gap continuity logging. Keep this work. Prior validation: 20 tests, clean analysis and an Android debug APK; phone/H10 reliability remains unverified. Retain the outstanding device checks and external backups. Do not delay markers/history for broader recovery work or a major refactor; fix demonstrated recording/data-loss defects promptly.
 
-Remaining gate: S24/H10 trials for manual reconnect, strap loss/return, Bluetooth toggles, pause/stop during recovery, exhaustion/manual retry, screen-off/background recording and saved ZIP reconciliation. Verify one session/participant, no duplicate packets, unchanged raw RR, and no adjacency across gaps. Do not promise overnight or process-death recovery. Preserve external source backups until recovery is confirmed by the user.
+## 1. Quick markers
 
-## 2. Persistent users and custom quick markers
+Persistent custom buttons with add/remove/rename/reorder. One tap records label/type, timestamp, current participant and session without typing; optional notes afterward. Stable definition IDs and event label snapshots preserve history through definition edits/removal. Use current participant information; no profiles prerequisite.
 
-Stable user IDs, display names, preferred strap, optional notes and a default user. Keep historical assignment snapshots independent of edits. Add/remove/rename/reorder custom quick-marker definitions with stable IDs and recorded label snapshots. One tap saves label/type/time/session/participant; notes remain optional. Verify persistence across restart/update and export compatibility. Simultaneous acquisition remains separate work.
+Completion: definitions/order survive restart/update; one tap creates one correctly associated event; renaming/deleting a definition cannot alter old events; optional notes and exports remain compatible. Include keyboard-safe editing forms and clear button colors/labels.
 
-## 3. Configurable raw/screened metrics
+## 2. History MVP
 
-Raw initial view, range-only and artifact-screened options; configurable bounds, deviation reference, time windows and minimum coverage. Record versioned processing configuration and changes. Never overwrite raw input. Share processing between Live/History; expose missing results, exclusions, gaps and insufficient coverage. Address seed lock-in/sustained rate changes. Initially HR, RR/IBI, RMSSD, lnRMSSD, SDNN, pNN50, coverage and baseline change. No ECG-verified NN or physiological-state claim from RR screening alone. Verify metric math, gap boundaries and settings replay.
+Prioritize finding a session, viewing its events and adding "what helped/how I felt" notes. List/open existing local sessions across restarts, using current participant/device metadata. Show HR/RR/RMSSD plots with event markers, gaps and timestamp/value inspection. Expose **raw versus current screened data immediately**, including excluded raw RR values, with explicit method/window labels. Preserve recorded flags and distinguish them from any current-method recomputation; raw rows never change and RR pairs never bridge gaps or exclusions.
 
-## 4. Bounded interactive plots
+Edit descriptions, notes and outcome tags with originals/edit provenance retained. Re-export the selected session including annotations. Handle older files and incomplete/interrupted sessions explicitly. Do not require a full Users screen, configurable filters, advanced metrics, segment comparisons or automatic interpretation first. Use existing session files with deliberate compatible metadata extensions.
 
-Follow-live/inspect modes, bounded horizontal pan/zoom, vertical pan locked by default, fit/back-to-live and window presets. Prefer stacked native-unit plots with shared time axis, contrasting series and saved selections. Inspection uses original data; display downsampling preserves extremes. Shared cursor, marker inspection and explicit interval selection; desktop hover/wheel behavior. Prove no empty off-data viewport and continued recording during inspection. Chart library choice remains open.
+Completion: old/new/incomplete-session fixtures; restart/list/open; known excluded RR visible in raw view; screened math and gap boundaries; event/value inspection; annotation persistence and export round-trip without raw changes. Include contrasting plot colors, bounded movement and keyboard-safe forms in this MVP.
 
-## 5. Navigation and forms
+## 3. Processing and plots
 
-Live, History, Users, Settings; mobile navigation respects system insets and desktop uses wider panels. Screens receive the existing app controller and must not own/dispose recording. Persistent recording indicator. Reachable save controls and keyboard-safe forms. Verify navigation during active recovery/recording and form behavior on the phone.
+Expand the MVP comparison to configurable raw/range-only/artifact-screened analysis, RR bounds/deviation reference, windows and coverage gates. Choose metrics and improve plot interactions, colors and bounds; share processing between Live/History and record configuration/version changes. Address filter seed lock-in and sustained rate changes without replacing raw input. More advanced metrics/segment comparisons follow the usable history flow.
 
-## 6. History analysis and annotation
+Completion: processing math, settings replay, missing-result/exclusion reporting, bounded viewport/inspection and recording during plot interaction. No ECG-verified NN or physiological-state claim from RR screening alone.
 
-Discover/reopen sessions across restarts; filter by user/device/date/event/outcome. Synchronized plots with gaps and markers, HR/HRV/coverage summaries, selected-segment and before/after-marker comparisons. Editable assignment/description/notes/tags/markers retain originals and edit history. Existing free-text outcomes remain compatible; distinguish subjective outcomes from trends. Define incomplete-session handling. Higher RMSSD is not automatically improvement. Verify old/new/incomplete fixtures, edits and export round-trips.
+## 4. Users
 
-## 7. Feedback rules
+Persistent profiles, stable user IDs, defaults/preferred strap assignments and history filtering by user/device. Preserve historical assignment snapshots when profiles change. Existing participant information supports stages 1-3; simultaneous collection remains separate.
 
-Only after the above: versioned sustained-trend, data-loss/quality and recovery rules with baseline, coverage, persistence and cooldown gates. Save evidence and automatic detections separately from user markers; optional confirmation/dismissal, neutral audio and silent mode. No diagnosis or unvalidated good/bad physiological labels.
+Completion: restart/update persistence, historical identity stability, assignment changes and user/device filtering. Add focused navigation when needed, not a prerequisite app-wide restructuring.
+
+## 5. Recovery and feedback
+
+Validate/harden existing automatic Bluetooth recovery where needed; manual reconnect is already available. Device checks remain strap loss/return, radio toggles, manual recovery, pause/stop races, retry exhaustion, screen-off/background behavior and saved-file reconciliation. Do not claim force-stop or overnight reliability.
+
+Later add background trend detection and optional neutral audio cues, with versioned rules, evidence, baseline/coverage gates, persistence and cooldown. Automatic detections stay separate from user markers. Verify cancellation, sustained detection/cooldown and silent mode. No diagnosis or unvalidated good/bad physiological labels.
+
+## Requirements across touched screens
+
+Improve contrasting colors, bound plots where present, and keep forms keyboard/system-inset safe with reachable Save controls. Navigation and inspection must retain the existing app-owned recording controller. Keep changes focused on markers/history first; larger restructuring is deferred. Preserve raw data and distinguish subjective outcomes from measured trends; higher RMSSD is not automatically improvement.
 
 ## Later integration and validation
 
