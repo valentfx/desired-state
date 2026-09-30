@@ -18,6 +18,7 @@ class SessionLogger {
   final String polarId;
   final String participantName;
   Future<void> _writes = Future.value();
+  Future<void> _annotationWrites = Future.value();
   final Map<String, IOSink> _sinks = {};
   Timer? _flushTimer;
   int _pendingRows = 0;
@@ -113,20 +114,57 @@ class SessionLogger {
     String event, {
     String? description,
     DateTime? receivedAt,
+    String? eventId,
+    String? markerDefinitionId,
+    String? markerLabel,
+    String? markerType,
+    bool flush = false,
   }) {
-    return _enqueue(
-      () => _appendJsonl('events', {
+    final timestamp = (receivedAt ?? DateTime.now()).toUtc().toIso8601String();
+    return _enqueue(() async {
+      await _appendJsonl('events', {
         'session_id': sessionId,
         'polar_id': polarId,
         'user_id': participantName,
         'event': event,
-        'received_utc': (receivedAt ?? DateTime.now())
-            .toUtc()
-            .toIso8601String(),
+        'received_utc': timestamp,
+        'event_id': ?eventId,
+        'marker_definition_id': ?markerDefinitionId,
+        'marker_label': ?markerLabel,
+        'marker_type': ?markerType,
         if (description != null && description.trim().isNotEmpty)
           'description': description.trim(),
-      }),
+      });
+      if (flush) await _flushSinks();
+    });
+  }
+
+  /// Append-only annotations can be added after Stop without reopening raw sinks.
+  Future<void> addMarkerNote(String eventId, String note) {
+    final timestamp = DateTime.now().toUtc().toIso8601String();
+    if (note.trim().isEmpty) throw ArgumentError('Enter a note');
+    final row = {
+      'schema_version': 1,
+      'event': 'marker_note_added',
+      'event_id': eventId,
+      'session_id': sessionId,
+      'polar_id': polarId,
+      'user_id': participantName,
+      'received_utc': timestamp,
+      'description': note.trim(),
+    };
+    final operation = _annotationWrites.then(
+      (_) => File('${directory.path}/marker_notes.jsonl')
+          .writeAsString(
+            '${jsonEncode(row)}\n',
+            mode: FileMode.append,
+            flush: true,
+          )
+          .then((_) {}),
     );
+    // Annotation failures must never interrupt raw recording or later notes.
+    _annotationWrites = operation.catchError((Object _) {});
+    return operation;
   }
 
   Future<void> close() async {
@@ -135,6 +173,7 @@ class SessionLogger {
     _flushTimer?.cancel();
     await writeEvent('session_ended');
     await _writes;
+    await _annotationWrites;
     await _flushSinks();
     await Future.wait(_sinks.values.map((sink) => sink.close()));
   }
@@ -142,11 +181,13 @@ class SessionLogger {
   /// Creates a portable copy of one completed session for a deliberate export.
   Future<File> createExportZip() async {
     await _writes;
+    await _annotationWrites;
     const fileNames = [
       'manifest.json',
       'events.jsonl',
       'measurements.jsonl',
       'rr.jsonl',
+      'marker_notes.jsonl',
     ];
     final archive = Archive();
     for (final name in fileNames) {

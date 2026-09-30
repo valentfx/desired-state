@@ -9,6 +9,7 @@ import 'package:desired_state_app/session_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:archive/archive.dart';
 
 class FakePolar extends PolarH10Service {
   final data = StreamController<PolarHeartRateData>.broadcast(sync: true);
@@ -120,6 +121,94 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     await temp.delete(recursive: true);
   });
+
+  test('quick marker snapshots and later notes survive definition edits and export', () async {
+    final store = controller.quickMarkers;
+    await store.load();
+    final definition = store.items.first;
+    final logger = controller.sessionLogger!;
+    polar.emit([1000, 1010]);
+    final markers = await Future.wait([
+      controller.markQuickMarker(definition),
+      controller.markQuickMarker(definition),
+    ]);
+    expect(markers.map((marker) => marker!.id).toSet(), hasLength(2));
+    await store.rename(definition.id, 'Renamed');
+    await store.remove(definition.id);
+    controller.pause();
+    final pausedMarker = await controller.markQuickMarker(store.items.first);
+    expect(pausedMarker, isNotNull);
+    expect(controller.recordingState, RecordingState.paused);
+    await controller.addMarkerNote(markers.first!, 'Before stop');
+    await controller.stop();
+    final raw = await File('${logger.directory.path}/rr.jsonl').readAsBytes();
+    final originalEvents = await File('${logger.directory.path}/events.jsonl')
+        .readAsBytes();
+    await controller.addMarkerNote(markers.first!, 'What helped afterward');
+    expect(await File('${logger.directory.path}/rr.jsonl').readAsBytes(), raw);
+    expect(
+      await File('${logger.directory.path}/events.jsonl').readAsBytes(),
+      originalEvents,
+    );
+    final events = (await rows(
+      logger.directory,
+      'events',
+    )).where((row) => row['event'] == 'marked_event').toList();
+    expect(events, hasLength(3));
+    expect(events.first['marker_label'], definition.label);
+    expect(events.first['marker_definition_id'], definition.id);
+    expect(events.first['marker_type'], 'quick');
+    expect(events.first['event_id'], markers.first!.id);
+    expect(
+      events.first['received_utc'],
+      markers.first!.timestamp.toUtc().toIso8601String(),
+    );
+    expect(events.first['session_id'], logger.sessionId);
+    expect(events.first['user_id'], 'test participant');
+    final notes = await rows(logger.directory, 'marker_notes');
+    expect(notes.map((row) => row['event_id']).toSet(), {markers.first!.id});
+    expect(notes.map((row) => row['description']), [
+      'Before stop',
+      'What helped afterward',
+    ]);
+    final zip = ZipDecoder().decodeBytes(
+      await (await logger.createExportZip()).readAsBytes(),
+    );
+    expect(
+      zip.files.map((file) => file.name),
+      contains('${logger.sessionId}/marker_notes.jsonl'),
+    );
+    expect(await controller.markQuickMarker(store.items.first), isNull);
+  });
+
+  test(
+    'failed note save does not interrupt raw recording or later annotations',
+    () async {
+      final logger = controller.sessionLogger!;
+      await controller.quickMarkers.load();
+      final marker = (await controller.markQuickMarker(
+        controller.quickMarkers.items.first,
+      ))!;
+      final obstruction = Directory(
+        '${logger.directory.path}/marker_notes.jsonl',
+      );
+      await obstruction.create();
+      await expectLater(
+        controller.addMarkerNote(marker, 'unsaved'),
+        throwsA(isA<FileSystemException>()),
+      );
+      polar.emit([1000, 1010]);
+      await obstruction.delete();
+      await controller.addMarkerNote(marker, 'saved');
+      await controller.stop();
+      expect(await rows(logger.directory, 'rr'), hasLength(2));
+      expect(
+        (await rows(logger.directory, 'marker_notes')).single['description'],
+        'saved',
+      );
+      expect(controller.error, isNull);
+    },
+  );
 
   test(
     'disconnect recovery preserves session, notes, raw rows and gap adjacency',

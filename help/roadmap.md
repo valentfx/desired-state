@@ -1,22 +1,20 @@
 # Desired State roadmap
 
-Reprioritized 2026-09-30: quick markers first, then History MVP. This order supersedes the earlier recovery/users-first plan. See [current-state.md](current-state.md), [app-development-plan.md](app-development-plan.md) and [project-log.md](project-log.md). All five deliverables below remain planned except the explicitly identified recovery checkpoint.
+Reprioritized 2026-09-30: quick markers first, then History MVP. This order supersedes the earlier recovery/users-first plan. See [current-state.md](current-state.md), [app-development-plan.md](app-development-plan.md) and [project-log.md](project-log.md). Quick-marker software is now implemented; History MVP is next. Later stages and phone validation remain pending except for the existing recovery checkpoint.
 
 ## Existing recovery checkpoint: preserve
 
 Commit `15caeee` already implements app-owned recording, manual Reconnect H10, bounded automatic recovery, stale-data detection, subscription cancellation, status/age and gap continuity logging. Keep this work. Prior validation: 20 tests, clean analysis and an Android debug APK; phone/H10 reliability remains unverified. Retain the outstanding device checks and external backups. Do not delay markers/history for broader recovery work or a major refactor; fix demonstrated recording/data-loss defects promptly.
 
-## 1. Quick markers
+## 1. Quick markers - software completed
 
-Persistent custom buttons with add/remove/rename/reorder. One tap records label/type, timestamp, current participant and session without typing; optional notes afterward. Stable definition IDs and event label snapshots preserve history through definition edits/removal. Use current participant information; no profiles prerequisite.
+Persistent custom buttons, add/rename/remove/reorder, immutable event snapshots, optional later notes and annotation-aware export are implemented. See [current-state.md](current-state.md) for storage contracts and automated evidence. Remaining device checks: confirm labels/order after phone restart/update, repeated taps during H10 recording, note entry while recording/paused/after Stop, and exported annotations. This does not block History MVP.
 
-Completion: definitions/order survive restart/update; one tap creates one correctly associated event; renaming/deleting a definition cannot alter old events; optional notes and exports remain compatible. Include keyboard-safe editing forms and clear button colors/labels.
-
-## 2. History MVP
+## 2. History MVP - next
 
 Prioritize finding a session, viewing its events and adding "what helped/how I felt" notes. List/open existing local sessions across restarts, using current participant/device metadata. Show HR/RR/RMSSD plots with event markers, gaps and timestamp/value inspection. Expose **raw versus current screened data immediately**, including excluded raw RR values, with explicit method/window labels. Preserve recorded flags and distinguish them from any current-method recomputation; raw rows never change and RR pairs never bridge gaps or exclusions.
 
-Edit descriptions, notes and outcome tags with originals/edit provenance retained. Re-export the selected session including annotations. Handle older files and incomplete/interrupted sessions explicitly. Do not require a full Users screen, configurable filters, advanced metrics, segment comparisons or automatic interpretation first. Use existing session files with deliberate compatible metadata extensions.
+Read existing marker event IDs/label snapshots and optional `marker_notes.jsonl`, while supporting older files without them. Edit descriptions, notes and outcome tags with originals/edit provenance retained. Re-export the selected session including annotations. Handle older files and incomplete/interrupted sessions explicitly. Do not require a full Users screen, configurable filters, advanced metrics, segment comparisons or automatic interpretation first. Use existing session files with deliberate compatible metadata extensions.
 
 Completion: old/new/incomplete-session fixtures; restart/list/open; known excluded RR visible in raw view; screened math and gap boundaries; event/value inspection; annotation persistence and export round-trip without raw changes. Include contrasting plot colors, bounded movement and keyboard-safe forms in this MVP.
 

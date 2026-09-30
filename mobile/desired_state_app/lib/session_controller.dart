@@ -8,6 +8,7 @@ import 'polar_h10_service.dart';
 import 'recording_foreground_service.dart';
 import 'rr_history.dart';
 import 'session_logger.dart';
+import 'quick_markers.dart';
 
 enum RecordingState { stopped, recording, paused }
 
@@ -32,6 +33,7 @@ class SessionController extends ChangeNotifier {
     this.elapsedClock,
     Duration tickInterval = const Duration(seconds: 1),
   }) : polar = service ?? PolarH10Service(),
+       quickMarkers = QuickMarkerStore(directoryProvider: directoryProvider),
        _foreground = foregroundService ?? RecordingForegroundService() {
     assert(maxAttempts > 0 && staleAfter > Duration.zero);
     _dataSubscription = polar.dataStream.listen(_onData);
@@ -42,6 +44,9 @@ class SessionController extends ChangeNotifier {
   }
 
   final PolarH10Service polar;
+  final QuickMarkerStore quickMarkers;
+  final List<RecordedMarker> recordedMarkers = [];
+  final Map<String, List<String>> markerNotes = {};
   final RecordingForegroundService _foreground;
   final Future<Directory> Function()? directoryProvider;
   final Duration staleAfter;
@@ -59,6 +64,7 @@ class SessionController extends ChangeNotifier {
   RecordingState recordingState = RecordingState.stopped;
   SessionLogger? sessionLogger;
   SessionLogger? lastSessionLogger;
+  String? _visibleSessionId;
   DateTime? sessionStartedAt;
   BluetoothDevice? _target;
   String deviceName = 'No H10 connected';
@@ -177,10 +183,13 @@ class SessionController extends ChangeNotifier {
         return;
       }
       sessionLogger = opened;
+      _visibleSessionId = opened.sessionId;
       lastSessionLogger = null;
       rrHistory.clear();
       timeline.clear();
       eventTimes.clear();
+      recordedMarkers.clear();
+      markerNotes.clear();
       rmssd = null;
       _gap = false;
       _segment = 0;
@@ -405,11 +414,58 @@ class SessionController extends ChangeNotifier {
   }
 
   Future<void> markEvent(String note) async {
+    await _recordMarker(note: note);
+  }
+
+  Future<RecordedMarker?> markQuickMarker(QuickMarkerDefinition definition) =>
+      _recordMarker(definition: definition);
+
+  Future<RecordedMarker?> _recordMarker({
+    QuickMarkerDefinition? definition,
+    String note = '',
+  }) async {
     final logger = sessionLogger;
-    if (logger == null || busy) return;
-    await logger.writeEvent('marked_event', description: note);
-    eventTimes.add(DateTime.now());
+    if (logger == null || busy) return null;
+    final marker = RecordedMarker(
+      id: newMarkerId(),
+      sessionId: logger.sessionId,
+      label: definition?.label ?? 'Event',
+      timestamp: DateTime.now(),
+    );
+    await logger.writeEvent(
+      'marked_event',
+      description: definition?.label ?? note,
+      receivedAt: marker.timestamp,
+      eventId: marker.id,
+      markerDefinitionId: definition?.id,
+      markerLabel: marker.label,
+      markerType: definition == null ? 'manual' : 'quick',
+      flush: true,
+    );
+    // A slow write completing after a new session starts belongs to the old log.
+    if (_disposed || _visibleSessionId != logger.sessionId) return marker;
+    eventTimes.add(marker.timestamp);
+    recordedMarkers.add(marker);
     _changed();
+    return marker;
+  }
+
+  Future<void> addMarkerNote(RecordedMarker marker, String note) async {
+    final logger = sessionLogger?.sessionId == marker.sessionId
+        ? sessionLogger
+        : lastSessionLogger;
+    if (logger == null ||
+        logger.sessionId != marker.sessionId ||
+        !recordedMarkers.any((item) => item.id == marker.id)) {
+      throw StateError(
+        'This marker is no longer available in the current view',
+      );
+    }
+    await logger.addMarkerNote(marker.id, note);
+    if (recordedMarkers.any((item) => item.id == marker.id)) {
+      markerNotes.putIfAbsent(marker.id, () => []).add(note.trim());
+      _changed();
+    }
   }
 
   Future<void> stop({String outcome = ''}) async {
@@ -461,6 +517,7 @@ class SessionController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    quickMarkers.dispose();
     _timer.cancel();
     _cancelRecovery();
     unawaited(_dataSubscription.cancel());

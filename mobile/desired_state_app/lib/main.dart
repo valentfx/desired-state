@@ -8,6 +8,7 @@ import 'package:share_plus/share_plus.dart';
 import 'rr_history.dart';
 import 'session_controller.dart';
 import 'session_logger.dart';
+import 'quick_marker_widgets.dart';
 
 void main() {
   runApp(const DesiredStateApp());
@@ -361,6 +362,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
       Text('Desired State', style: Theme.of(context).textTheme.headlineSmall),
       const SizedBox(height: 4),
       Text(_status),
+      QuickMarkerBar(controller: _controller),
       if (_lastSessionLogger != null)
         TextButton(
           onPressed: () => setState(() => _showConnect = false),
@@ -403,83 +405,91 @@ class _CollectorScreenState extends State<CollectorScreen> {
     padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
     child: Column(
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                '${_participantName()} · $_deviceName',
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.labelMedium,
-              ),
-            ),
-            Icon(
-              Icons.circle,
-              size: 10,
-              color: _recordingState == RecordingState.recording
-                  ? Colors.red
-                  : Colors.amber,
-            ),
-            const SizedBox(width: 4),
-            Text(
-              _recordingState == RecordingState.recording ? 'REC' : 'PAUSED',
-            ),
-            const SizedBox(width: 8),
-            Text(_formatDuration(_sessionElapsed)),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            _Metric(
-              label: 'HR',
-              value: _heartRate?.toString() ?? '--',
-              unit: 'bpm',
-            ),
-            _Metric(
-              label: 'RMSSD',
-              value: _rmssd?.toStringAsFixed(1) ?? '--',
-              unit: 'ms',
-            ),
-            _Metric(
-              label: 'RR',
-              value: _latestRr?.toStringAsFixed(0) ?? '--',
-              unit: 'ms',
-            ),
-          ],
-        ),
-        Text(
-          '${_controller.connectionStatus} · last data ${_controller.lastDataAge?.inSeconds.toString() ?? '--'}s ago · ${_rrHistory.artifactCount} artifacts',
-          style: Theme.of(context).textTheme.labelSmall,
-        ),
-        if (_controller.error != null) Text(_controller.error!),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            TextButton.icon(
-              onPressed: _controller.canReconnect
-                  ? _controller.reconnect
-                  : null,
-              icon: const Icon(Icons.bluetooth_connected),
-              label: const Text('Reconnect H10'),
-            ),
-            TextButton(
-              onPressed: _controller.busy ? null : _disconnect,
-              child: const Text('Disconnect'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
         Expanded(
-          child: _TimelineCard(
-            points: _timeline,
-            eventTimes: _eventTimes,
-            sessionStartedAt: _sessionStartedAt,
-            range: _timelineRange,
-            onRangeChanged: (value) => setState(() => _timelineRange = value),
+          child: ListView(
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '${_participantName()} · $_deviceName',
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelMedium,
+                    ),
+                  ),
+                  Icon(
+                    Icons.circle,
+                    size: 10,
+                    color: _recordingState == RecordingState.recording
+                        ? Colors.red
+                        : Colors.amber,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    _recordingState == RecordingState.recording
+                        ? 'REC'
+                        : 'PAUSED',
+                  ),
+                  const SizedBox(width: 8),
+                  Text(_formatDuration(_sessionElapsed)),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _Metric(
+                    label: 'HR',
+                    value: _heartRate?.toString() ?? '--',
+                    unit: 'bpm',
+                  ),
+                  _Metric(
+                    label: 'RMSSD',
+                    value: _rmssd?.toStringAsFixed(1) ?? '--',
+                    unit: 'ms',
+                  ),
+                  _Metric(
+                    label: 'RR',
+                    value: _latestRr?.toStringAsFixed(0) ?? '--',
+                    unit: 'ms',
+                  ),
+                ],
+              ),
+              Text(
+                '${_controller.connectionStatus} · last data ${_controller.lastDataAge?.inSeconds.toString() ?? '--'}s ago · ${_rrHistory.artifactCount} artifacts',
+                style: Theme.of(context).textTheme.labelSmall,
+              ),
+              if (_controller.error != null) Text(_controller.error!),
+              Wrap(
+                alignment: WrapAlignment.center,
+                children: [
+                  TextButton.icon(
+                    onPressed: _controller.canReconnect
+                        ? _controller.reconnect
+                        : null,
+                    icon: const Icon(Icons.bluetooth_connected),
+                    label: const Text('Reconnect H10'),
+                  ),
+                  TextButton(
+                    onPressed: _controller.busy ? null : _disconnect,
+                    child: const Text('Disconnect'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              QuickMarkerBar(controller: _controller),
+              _TimelineCard(
+                points: _timeline,
+                eventTimes: _eventTimes,
+                sessionStartedAt: _sessionStartedAt,
+                range: _timelineRange,
+                onRangeChanged: (value) =>
+                    setState(() => _timelineRange = value),
+              ),
+              const SizedBox(height: 8),
+            ],
           ),
         ),
-        const SizedBox(height: 8),
         Row(
           children: [
             Expanded(
@@ -520,6 +530,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text('Session saved', style: Theme.of(context).textTheme.headlineSmall),
+        QuickMarkerBar(controller: _controller),
         const SizedBox(height: 8),
         Text(
           '${_timeline.length} updates · ${_eventTimes.length} events · ${_rrHistory.artifactCount} artifacts',
@@ -623,6 +634,7 @@ class _TimelineCard extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Row(
               children: [
@@ -669,10 +681,11 @@ class _TimelineCard extends StatelessWidget {
                 height: 190,
                 width: double.infinity,
                 child: InteractiveViewer(
-                  constrained: false,
+                  constrained: true,
+                  panAxis: PanAxis.horizontal,
                   minScale: 1,
                   maxScale: 12,
-                  boundaryMargin: const EdgeInsets.all(100),
+                  boundaryMargin: EdgeInsets.zero,
                   child: SizedBox(
                     width: constraints.maxWidth,
                     height: 190,
@@ -690,7 +703,9 @@ class _TimelineCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 4),
-            const Text('Pinch to zoom · drag to pan · blue HR / green RMSSD'),
+            const Text(
+              'Pinch to zoom · drag horizontally · blue HR / orange RMSSD',
+            ),
           ],
         ),
       ),
@@ -732,7 +747,7 @@ class _SessionTimelinePainter extends CustomPainter {
             ) *
             plot.width;
     final eventPaint = Paint()
-      ..color = colorScheme.tertiary.withValues(alpha: .75)
+      ..color = Colors.purple.shade600.withValues(alpha: .75)
       ..strokeWidth = 1.5;
     for (final timestamp in eventTimes) {
       if (timestamp.isBefore(start) || timestamp.isAfter(end)) continue;
@@ -752,7 +767,7 @@ class _SessionTimelinePainter extends CustomPainter {
           )
           .toList(),
       x,
-      colorScheme.primary,
+      Colors.blue.shade700,
     );
     _drawSeries(
       canvas,
@@ -763,7 +778,7 @@ class _SessionTimelinePainter extends CustomPainter {
             (point.timestamp, point.rmssd!, point.segment),
       ],
       x,
-      colorScheme.tertiary,
+      Colors.orange.shade800,
     );
     _axisLabels(
       canvas,
@@ -806,22 +821,22 @@ class _SessionTimelinePainter extends CustomPainter {
       label(
         '${heartRates.reduce(math.max).round()}',
         const Offset(0, 8),
-        colorScheme.primary,
+        Colors.blue.shade700,
       );
       label(
         '${heartRates.reduce(math.min).round()}',
         Offset(0, size.height - 34),
-        colorScheme.primary,
+        Colors.blue.shade700,
       );
     }
     if (rmssd.isNotEmpty) {
       final high = rmssd.reduce(math.max).toStringAsFixed(0);
       final low = rmssd.reduce(math.min).toStringAsFixed(0);
-      label(high, Offset(size.width - 30, 8), colorScheme.tertiary);
+      label(high, Offset(size.width - 30, 8), Colors.orange.shade800);
       label(
         low,
         Offset(size.width - 30, size.height - 34),
-        colorScheme.tertiary,
+        Colors.orange.shade800,
       );
     }
   }
