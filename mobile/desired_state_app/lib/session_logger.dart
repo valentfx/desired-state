@@ -52,6 +52,8 @@ class SessionLogger {
       'source': 'desired_state_flutter',
       'description': description.trim(),
       'rr_processing': 'mobile-median9-25pct-300-2000-v1',
+      'continuity_version': 1,
+      'continuity_description': 'Never pair RR across continuity_segment changes; receipt UTC is not beat time.',
       'assignments': {polarId.toUpperCase(): participantName},
       'devices': {
         polarId.toUpperCase(): {
@@ -76,6 +78,7 @@ class SessionLogger {
     required int heartRate,
     required List<LoggedRr> intervals,
     required DateTime receivedAt,
+    int? continuitySegment,
   }) {
     return _enqueue(() async {
       final stamp = receivedAt.toUtc().toIso8601String();
@@ -86,6 +89,7 @@ class SessionLogger {
         'received_utc': stamp,
         'heart_rate_bpm': heartRate,
         'rr_count': intervals.length,
+        'continuity_segment': ?continuitySegment,
       });
       for (var index = 0; index < intervals.length; index++) {
         final interval = intervals[index];
@@ -96,6 +100,7 @@ class SessionLogger {
           'received_utc': stamp,
           'rr_index': index,
           'rr_ms': interval.rrMs,
+          'continuity_segment': ?continuitySegment,
           'artifact_accepted': interval.accepted,
           if (interval.artifactReason != null)
             'artifact_reason': interval.artifactReason,
@@ -104,14 +109,20 @@ class SessionLogger {
     });
   }
 
-  Future<void> writeEvent(String event, {String? description, DateTime? receivedAt}) {
+  Future<void> writeEvent(
+    String event, {
+    String? description,
+    DateTime? receivedAt,
+  }) {
     return _enqueue(
       () => _appendJsonl('events', {
         'session_id': sessionId,
         'polar_id': polarId,
         'user_id': participantName,
         'event': event,
-        'received_utc': (receivedAt ?? DateTime.now()).toUtc().toIso8601String(),
+        'received_utc': (receivedAt ?? DateTime.now())
+            .toUtc()
+            .toIso8601String(),
         if (description != null && description.trim().isNotEmpty)
           'description': description.trim(),
       }),

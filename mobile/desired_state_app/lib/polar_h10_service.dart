@@ -25,10 +25,17 @@ class PolarH10Service {
 
   BluetoothDevice? _device;
   StreamSubscription<List<int>>? _measurementSubscription;
+  StreamSubscription<BluetoothConnectionState>? _connectionSubscription;
+  final _connectionController = StreamController<bool>.broadcast(sync: true);
+  Future<void> _operations = Future.value();
+  int _generation = 0;
 
-  final _dataController = StreamController<PolarHeartRateData>.broadcast();
+  final _dataController = StreamController<PolarHeartRateData>.broadcast(
+    sync: true,
+  );
 
   Stream<PolarHeartRateData> get dataStream => _dataController.stream;
+  Stream<bool> get connectionStream => _connectionController.stream;
 
   BluetoothDevice? get device => _device;
 
@@ -54,54 +61,92 @@ class PolarH10Service {
         );
     });
 
-    await FlutterBluePlus.startScan(
-      timeout: timeout,
-      withServices: [_heartRateService],
-    );
-
-    await FlutterBluePlus.isScanning
-        .where((scanning) => scanning == false)
-        .first;
-
-    await subscription.cancel();
+    try {
+      await FlutterBluePlus.startScan(
+        timeout: timeout,
+        withServices: [_heartRateService],
+      );
+      await FlutterBluePlus.isScanning
+          .where((scanning) => scanning == false)
+          .first;
+    } finally {
+      await subscription.cancel();
+    }
 
     return results;
   }
 
-  Future<void> connect(BluetoothDevice device) async {
-    await disconnect();
+  Future<void> connect(BluetoothDevice device) {
+    final generation = ++_generation;
+    return _serialize(() => _connect(device, generation));
+  }
 
-    await device.connect(
-      license: License.nonprofit,
-      timeout: const Duration(seconds: 15),
-    );
+  Future<void> _serialize(Future<void> Function() action) {
+    final operation = _operations.then((_) => action());
+    _operations = operation.catchError((Object _) {});
+    return operation;
+  }
 
+  Future<void> _connect(BluetoothDevice device, int generation) async {
+    await _disconnect();
+    if (generation != _generation) throw StateError('Connection cancelled');
     _device = device;
+    try {
+      await device.connect(
+        license: License.nonprofit,
+        timeout: const Duration(seconds: 15),
+      );
 
-    final services = await device.discoverServices();
+      if (generation != _generation) throw StateError('Connection cancelled');
+      _connectionSubscription = device.connectionState.listen((state) {
+        if (generation != _generation) return;
+        if (state == BluetoothConnectionState.disconnected) {
+          // Invalidate packet callbacks immediately, before asynchronous cleanup.
+          _connectionLost(generation);
+        }
+      });
 
-    BluetoothCharacteristic? measurement;
+      final services = await device.discoverServices();
+      if (generation != _generation) throw StateError('Connection cancelled');
 
-    for (final service in services) {
-      if (service.uuid == _heartRateService) {
-        for (final characteristic in service.characteristics) {
-          if (characteristic.uuid == _heartRateMeasurement) {
-            measurement = characteristic;
-            break;
+      BluetoothCharacteristic? measurement;
+
+      for (final service in services) {
+        if (service.uuid == _heartRateService) {
+          for (final characteristic in service.characteristics) {
+            if (characteristic.uuid == _heartRateMeasurement) {
+              measurement = characteristic;
+              break;
+            }
           }
         }
       }
+
+      if (measurement == null) {
+        throw StateError('Heart Rate Measurement characteristic not found.');
+      }
+
+      _measurementSubscription = measurement.onValueReceived.listen(
+        (value) {
+          if (generation == _generation) _parseMeasurement(value);
+        },
+        onError: (Object _) => _connectionLost(generation),
+        onDone: () => _connectionLost(generation),
+      );
+      await measurement.setNotifyValue(true);
+      if (generation != _generation) throw StateError('Connection cancelled');
+    } catch (_) {
+      await _disconnect();
+      rethrow;
+    } finally {
+      if (generation != _generation) await _disconnect();
     }
+  }
 
-    if (measurement == null) {
-      throw StateError('Heart Rate Measurement characteristic not found.');
-    }
-
-    await measurement.setNotifyValue(true);
-
-    _measurementSubscription = measurement.onValueReceived.listen(
-      _parseMeasurement,
-    );
+  void _connectionLost(int generation) {
+    if (generation != _generation) return;
+    _generation++;
+    _connectionController.add(false);
   }
 
   void _parseMeasurement(List<int> value) {
@@ -161,9 +206,16 @@ class PolarH10Service {
     );
   }
 
-  Future<void> disconnect() async {
+  Future<void> disconnect() {
+    _generation++;
+    return _serialize(_disconnect);
+  }
+
+  Future<void> _disconnect() async {
     await _measurementSubscription?.cancel();
     _measurementSubscription = null;
+    await _connectionSubscription?.cancel();
+    _connectionSubscription = null;
 
     if (_device != null) {
       try {
@@ -179,5 +231,6 @@ class PolarH10Service {
   Future<void> dispose() async {
     await disconnect();
     await _dataController.close();
+    await _connectionController.close();
   }
 }

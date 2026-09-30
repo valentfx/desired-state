@@ -18,8 +18,8 @@ class RecordingService : Service() {
             sessionId = intent.getStringExtra(SESSION_ID) ?: "active session"
         }
         state = intent?.getStringExtra(STATE) ?: state
-        heartRate = intent?.getIntExtra(HEART_RATE, -1)?.takeIf { it >= 0 } ?: heartRate
-        rmssd = intent?.getDoubleExtra(RMSSD, Double.NaN)?.takeIf { it.isFinite() } ?: rmssd
+        heartRate = intent?.getIntExtra(HEART_RATE, -1)?.takeIf { it >= 0 }
+        rmssd = intent?.getDoubleExtra(RMSSD, Double.NaN)?.takeIf { it.isFinite() }
         artifactCount = intent?.getIntExtra(ARTIFACT_COUNT, artifactCount) ?: artifactCount
         elapsedSeconds = intent?.getIntExtra(ELAPSED_SECONDS, elapsedSeconds) ?: elapsedSeconds
         val notification = buildNotification()

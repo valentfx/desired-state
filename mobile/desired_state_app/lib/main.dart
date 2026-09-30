@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -6,17 +5,29 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 
-import 'polar_h10_service.dart';
 import 'rr_history.dart';
-import 'recording_foreground_service.dart';
+import 'session_controller.dart';
 import 'session_logger.dart';
 
 void main() {
   runApp(const DesiredStateApp());
 }
 
-class DesiredStateApp extends StatelessWidget {
+class DesiredStateApp extends StatefulWidget {
   const DesiredStateApp({super.key});
+
+  @override
+  State<DesiredStateApp> createState() => _DesiredStateAppState();
+}
+
+class _DesiredStateAppState extends State<DesiredStateApp> {
+  final SessionController _controller = SessionController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -27,121 +38,56 @@ class DesiredStateApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
         useMaterial3: true,
       ),
-      home: const CollectorScreen(),
+      home: CollectorScreen(controller: _controller),
     );
   }
 }
 
 class CollectorScreen extends StatefulWidget {
-  const CollectorScreen({super.key, this.service});
+  const CollectorScreen({super.key, required this.controller});
 
-  final PolarH10Service? service;
+  final SessionController controller;
 
   @override
   State<CollectorScreen> createState() => _CollectorScreenState();
 }
 
 class _CollectorScreenState extends State<CollectorScreen> {
-  late final PolarH10Service _polar;
-
-  StreamSubscription<PolarHeartRateData>? _dataSubscription;
-
+  late final SessionController _controller;
   List<ScanResult> _scanResults = [];
-
   bool _scanning = false;
-  bool _connecting = false;
-  bool _connected = false;
-
-  String _status = 'Ready';
-  String _deviceName = 'No H10 connected';
-
-  int? _heartRate;
-  double? _latestRr;
-  double? _rmssd;
-  String? _polarId;
-  RecordingState _recordingState = RecordingState.stopped;
   bool _exporting = false;
-  DateTime? _sessionStartedAt;
-  DateTime _lastForegroundUpdate = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _showConnect = false;
+  String? _scanStatus;
+  bool get _connecting => _controller.connecting;
+  bool get _connected => _controller.connected;
+  String get _status => _controller.error ?? _scanStatus ?? _controller.status;
+  String get _deviceName => _controller.deviceName;
+  int? get _heartRate => _controller.heartRate;
+  double? get _latestRr => _controller.latestRr;
+  double? get _rmssd => _controller.rmssd;
+  RecordingState get _recordingState => _controller.recordingState;
+  DateTime? get _sessionStartedAt => _controller.sessionStartedAt;
+  RrHistory get _rrHistory => _controller.rrHistory;
+  List<TimelinePoint> get _timeline => _controller.timeline;
+  List<DateTime> get _eventTimes => _controller.eventTimes;
+  SessionLogger? get _sessionLogger => _controller.sessionLogger;
+  SessionLogger? get _lastSessionLogger => _controller.lastSessionLogger;
   _TimelineRange _timelineRange = _TimelineRange.minutes10;
-
-  final RrHistory _rrHistory = RrHistory();
-  final List<_TimelinePoint> _timeline = [];
-  final List<DateTime> _eventTimes = [];
-  final TextEditingController _participantNameController =
-      TextEditingController();
-  final TextEditingController _eventDescriptionController =
-      TextEditingController();
-  final TextEditingController _sessionDescriptionController =
-      TextEditingController();
-  final TextEditingController _outcomeController = TextEditingController();
-  SessionLogger? _sessionLogger;
-  SessionLogger? _lastSessionLogger;
-  final RecordingForegroundService _foregroundService =
-      RecordingForegroundService();
+  final _participantNameController = TextEditingController();
+  final _eventDescriptionController = TextEditingController();
+  final _sessionDescriptionController = TextEditingController();
+  final _outcomeController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _polar = widget.service ?? PolarH10Service();
+    _controller = widget.controller;
+    _controller.addListener(_refresh);
+  }
 
-    _dataSubscription = _polar.dataStream.listen((data) {
-      final logger = _sessionLogger;
-      final polarId = _polarId;
-      if (_recordingState == RecordingState.recording &&
-          logger != null &&
-          polarId != null) {
-        final intervals = _rrHistory.addAll(data.rrIntervalsMs);
-        unawaited(
-          logger.logMeasurement(
-            polarId: polarId,
-            participantName: _participantName(),
-            heartRate: data.heartRate,
-            intervals: [
-              for (final interval in intervals)
-                LoggedRr(
-                  rrMs: interval.rrMs,
-                  accepted: interval.accepted,
-                  artifactReason: interval.artifactReason,
-                ),
-            ],
-            receivedAt: data.timestamp,
-          ),
-        );
-      }
-
-      final rmssd = _recordingState == RecordingState.recording
-          ? _rrHistory.rmssd
-          : _rmssd;
-      if (_recordingState == RecordingState.recording) {
-        _timeline.add(
-          _TimelinePoint(
-            timestamp: data.timestamp,
-            heartRate: data.heartRate,
-            rmssd: rmssd,
-          ),
-        );
-        unawaited(
-          _updateForegroundNotification(
-            heartRate: data.heartRate,
-            rmssd: rmssd,
-            force: false,
-          ),
-        );
-      }
-
-      setState(() {
-        _heartRate = data.heartRate;
-
-        if (data.rrIntervalsMs.isNotEmpty) {
-          _latestRr = data.rrIntervalsMs.last;
-        }
-
-        if (_recordingState == RecordingState.recording) {
-          _rmssd = rmssd;
-        }
-      });
-    });
+  void _refresh() {
+    if (mounted) setState(() {});
   }
 
   Future<bool> _requestPermissions() async {
@@ -162,7 +108,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
 
     if (!permissionOk) {
       setState(() {
-        _status = 'Bluetooth permission denied';
+        _scanStatus = 'Bluetooth permission denied';
       });
       return;
     }
@@ -170,17 +116,17 @@ class _CollectorScreenState extends State<CollectorScreen> {
     setState(() {
       _scanning = true;
       _scanResults = [];
-      _status = 'Scanning for Polar H10...';
+      _scanStatus = 'Scanning for Polar H10...';
     });
 
     try {
-      final results = await _polar.scan();
+      final results = await _controller.polar.scan();
 
       if (!mounted) return;
 
       setState(() {
         _scanResults = results;
-        _status = results.isEmpty
+        _scanStatus = results.isEmpty
             ? 'No Polar H10 found'
             : 'Found ${results.length} device(s)';
       });
@@ -188,7 +134,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
       if (!mounted) return;
 
       setState(() {
-        _status = 'Scan error: $e';
+        _scanStatus = 'Scan error: $e';
       });
     } finally {
       if (mounted) {
@@ -200,65 +146,16 @@ class _CollectorScreenState extends State<CollectorScreen> {
   }
 
   Future<void> _connect(ScanResult result) async {
-    setState(() {
-      _connecting = true;
-      _status = 'Connecting...';
-    });
-
-    try {
-      await _polar.connect(result.device);
-
-      final name = result.device.platformName.trim();
-      final deviceName = name.isEmpty ? result.device.remoteId.str : name;
-      final polarId = _polarIdFrom(deviceName, result.device.remoteId.str);
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _connected = true;
-        _deviceName = deviceName;
-        _polarId = polarId;
-        _status = 'Connected — ready to record';
-      });
-    } catch (e) {
-      if (!mounted) return;
-
-      setState(() {
-        _connected = false;
-        _status = 'Connection error: $e';
-      });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _connecting = false;
-        });
-      }
-    }
+    _scanStatus = null;
+    await _controller.connect(result.device);
   }
 
-  Future<void> _disconnect() async {
-    await _polar.disconnect();
-    await _stopSession();
-
-    if (!mounted) return;
-
-    setState(() {
-      _connected = false;
-      _heartRate = null;
-      _latestRr = null;
-      _rmssd = null;
-      _rrHistory.clear();
-      _polarId = null;
-      _deviceName = 'No H10 connected';
-      _status = 'Disconnected';
-    });
-  }
+  Future<void> _disconnect() => _controller.disconnect();
 
   @override
   void dispose() {
-    _dataSubscription?.cancel();
-    _polar.dispose();
+    _controller.removeListener(_refresh);
+    // Only the app owner disposes a shared controller, never navigation.
     _participantNameController.dispose();
     _eventDescriptionController.dispose();
     _sessionDescriptionController.dispose();
@@ -266,105 +163,23 @@ class _CollectorScreenState extends State<CollectorScreen> {
     super.dispose();
   }
 
-  String _participantName() {
-    final name = _participantNameController.text.trim();
-    return name.isEmpty ? 'unassigned' : name;
-  }
-
-  String _polarIdFrom(String deviceName, String fallback) {
-    final match = RegExp(r'([A-Za-z0-9]{8})$').firstMatch(deviceName.trim());
-    return (match?.group(1) ?? fallback).toUpperCase();
-  }
+  String _participantName() => _controller.participant;
 
   Future<void> _markEvent() async {
-    final logger = _sessionLogger;
-    if (logger == null) return;
-    await logger.writeEvent(
-      'marked_event',
-      description: _eventDescriptionController.text,
-    );
-    if (!mounted) return;
-    setState(() {
-      _eventTimes.add(DateTime.now());
-      _eventDescriptionController.clear();
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Event saved to this session log.')),
-    );
+    await _controller.markEvent(_eventDescriptionController.text);
+    _eventDescriptionController.clear();
   }
 
   Future<void> _startSession() async {
-    final polarId = _polarId;
-    if (polarId == null || !_connected) return;
-    try {
-      final logger = await SessionLogger.start(
-        polarId: polarId,
-        deviceName: _deviceName,
-        participantName: _participantName(),
-        description: _sessionDescriptionController.text,
-      );
-      await _foregroundService.start(logger.sessionId);
-      if (!mounted) {
-        await _foregroundService.stop();
-        await logger.close();
-        return;
-      }
-      setState(() {
-        _rrHistory.clear();
-        _timeline.clear();
-        _eventTimes.clear();
-        _rmssd = null;
-        _sessionStartedAt = DateTime.now();
-        _lastForegroundUpdate = DateTime.fromMillisecondsSinceEpoch(0);
-        _sessionLogger = logger;
-        _recordingState = RecordingState.recording;
-        _status = 'Recording';
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() => _status = 'Could not start session log: $error');
-    }
+    await _controller.start(
+      participantName: _participantNameController.text,
+      description: _sessionDescriptionController.text,
+    );
+    if (mounted) setState(() => _showConnect = false);
   }
 
-  Future<void> _pauseSession() async {
-    final logger = _sessionLogger;
-    if (logger == null || _recordingState != RecordingState.recording) return;
-    await logger.writeEvent('session_paused');
-    _rrHistory.breakSequence();
-    await _updateForegroundNotification(force: true, state: 'Paused');
-    if (!mounted) return;
-    setState(() {
-      _recordingState = RecordingState.paused;
-      _status = 'Recording paused';
-    });
-  }
-
-  Future<void> _resumeSession() async {
-    final logger = _sessionLogger;
-    if (logger == null || _recordingState != RecordingState.paused) return;
-    _rrHistory.breakSequence();
-    await logger.writeEvent('session_resumed');
-    await _updateForegroundNotification(force: true, state: 'Recording');
-    if (!mounted) return;
-    setState(() {
-      _recordingState = RecordingState.recording;
-      _status = 'Recording';
-    });
-  }
-
-  Future<void> _stopSession() async {
-    final logger = _sessionLogger;
-    if (logger == null) return;
-    await logger.close();
-    await _foregroundService.stop();
-    if (!mounted) return;
-    setState(() {
-      _sessionLogger = null;
-      _lastSessionLogger = logger;
-      _recordingState = RecordingState.stopped;
-      _status = _connected ? 'Session saved' : _status;
-    });
-  }
+  void _pauseSession() => _controller.pause();
+  void _resumeSession() => _controller.resume();
 
   Future<void> _showSessionSetup() async {
     if (!_connected) return;
@@ -486,15 +301,9 @@ class _CollectorScreenState extends State<CollectorScreen> {
             FilledButton.tonal(
               onPressed: () async {
                 final outcome = _outcomeController.text;
-                if (outcome.trim().isNotEmpty) {
-                  await logger.writeEvent(
-                    'session_outcome',
-                    description: outcome,
-                  );
-                }
                 _outcomeController.clear();
-                if (context.mounted) Navigator.pop(context);
-                await _stopSession();
+                Navigator.pop(context);
+                await _controller.stop(outcome: outcome);
               },
               child: const Text('SAVE SESSION'),
             ),
@@ -528,35 +337,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
     }
   }
 
-  Duration get _sessionElapsed {
-    final startedAt = _sessionStartedAt;
-    if (startedAt == null) return Duration.zero;
-    return DateTime.now().difference(startedAt);
-  }
-
-  Future<void> _updateForegroundNotification({
-    int? heartRate,
-    double? rmssd,
-    String? state,
-    required bool force,
-  }) async {
-    if (_sessionLogger == null) return;
-    final now = DateTime.now();
-    if (!force &&
-        now.difference(_lastForegroundUpdate) < const Duration(seconds: 5)) {
-      return;
-    }
-    _lastForegroundUpdate = now;
-    await _foregroundService.update(
-      state:
-          state ??
-          (_recordingState == RecordingState.paused ? 'Paused' : 'Recording'),
-      heartRate: heartRate ?? _heartRate,
-      rmssd: rmssd ?? _rmssd,
-      artifactCount: _rrHistory.artifactCount,
-      elapsed: _sessionElapsed,
-    );
-  }
+  Duration get _sessionElapsed => _controller.sessionElapsed;
 
   @override
   Widget build(BuildContext context) {
@@ -568,7 +349,9 @@ class _CollectorScreenState extends State<CollectorScreen> {
         _recordingState == RecordingState.paused) {
       return _buildDashboard(context);
     }
-    if (_lastSessionLogger != null) return _buildCompleted(context);
+    if (_lastSessionLogger != null && !_showConnect) {
+      return _buildCompleted(context);
+    }
     return _buildConnect(context);
   }
 
@@ -578,12 +361,17 @@ class _CollectorScreenState extends State<CollectorScreen> {
       Text('Desired State', style: Theme.of(context).textTheme.headlineSmall),
       const SizedBox(height: 4),
       Text(_status),
+      if (_lastSessionLogger != null)
+        TextButton(
+          onPressed: () => setState(() => _showConnect = false),
+          child: const Text('Back to saved session'),
+        ),
       const SizedBox(height: 24),
       if (_connected) ...[
         _deviceLine(),
         const SizedBox(height: 20),
         FilledButton.icon(
-          onPressed: _showSessionSetup,
+          onPressed: _controller.busy ? null : _showSessionSetup,
           icon: const Icon(Icons.play_arrow),
           label: const Text('START RECORDING'),
         ),
@@ -661,8 +449,25 @@ class _CollectorScreenState extends State<CollectorScreen> {
           ],
         ),
         Text(
-          'Good signal · ${_rrHistory.artifactCount} artifacts · Connected',
+          '${_controller.connectionStatus} · last data ${_controller.lastDataAge?.inSeconds.toString() ?? '--'}s ago · ${_rrHistory.artifactCount} artifacts',
           style: Theme.of(context).textTheme.labelSmall,
+        ),
+        if (_controller.error != null) Text(_controller.error!),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            TextButton.icon(
+              onPressed: _controller.canReconnect
+                  ? _controller.reconnect
+                  : null,
+              icon: const Icon(Icons.bluetooth_connected),
+              label: const Text('Reconnect H10'),
+            ),
+            TextButton(
+              onPressed: _controller.busy ? null : _disconnect,
+              child: const Text('Disconnect'),
+            ),
+          ],
         ),
         const SizedBox(height: 8),
         Expanded(
@@ -690,17 +495,17 @@ class _CollectorScreenState extends State<CollectorScreen> {
             const SizedBox(width: 8),
             if (_recordingState == RecordingState.recording)
               FilledButton.tonal(
-                onPressed: _pauseSession,
+                onPressed: _controller.busy ? null : _pauseSession,
                 child: const Text('Pause'),
               )
             else
               FilledButton(
-                onPressed: _resumeSession,
+                onPressed: _controller.busy ? null : _resumeSession,
                 child: const Text('Continue'),
               ),
             const SizedBox(width: 8),
             IconButton.filledTonal(
-              onPressed: _showFinishSession,
+              onPressed: _controller.busy ? null : _showFinishSession,
               icon: const Icon(Icons.stop),
             ),
           ],
@@ -730,6 +535,11 @@ class _CollectorScreenState extends State<CollectorScreen> {
           onPressed: _connected ? _showSessionSetup : null,
           child: const Text('NEW SESSION'),
         ),
+        if (!_connected)
+          TextButton(
+            onPressed: () => setState(() => _showConnect = true),
+            child: const Text('Connect H10'),
+          ),
         TextButton(onPressed: _disconnect, child: const Text('Disconnect')),
       ],
     ),
@@ -747,8 +557,6 @@ class _CollectorScreenState extends State<CollectorScreen> {
   String _formatDuration(Duration value) =>
       '${value.inHours.toString().padLeft(2, '0')}:${(value.inMinutes % 60).toString().padLeft(2, '0')}:${(value.inSeconds % 60).toString().padLeft(2, '0')}';
 }
-
-enum RecordingState { stopped, recording, paused }
 
 class _Metric extends StatelessWidget {
   const _Metric({required this.label, required this.value, required this.unit});
@@ -772,18 +580,6 @@ class _Metric extends StatelessWidget {
 
 enum _TimelineRange { minutes2, minutes10, minutes30, hour, all }
 
-class _TimelinePoint {
-  const _TimelinePoint({
-    required this.timestamp,
-    required this.heartRate,
-    required this.rmssd,
-  });
-
-  final DateTime timestamp;
-  final int heartRate;
-  final double? rmssd;
-}
-
 class _TimelineCard extends StatelessWidget {
   const _TimelineCard({
     required this.points,
@@ -793,7 +589,7 @@ class _TimelineCard extends StatelessWidget {
     required this.onRangeChanged,
   });
 
-  final List<_TimelinePoint> points;
+  final List<TimelinePoint> points;
   final List<DateTime> eventTimes;
   final DateTime? sessionStartedAt;
   final _TimelineRange range;
@@ -911,7 +707,7 @@ class _SessionTimelinePainter extends CustomPainter {
     required this.colorScheme,
   });
 
-  final List<_TimelinePoint> points;
+  final List<TimelinePoint> points;
   final List<DateTime> eventTimes;
   final DateTime start;
   final DateTime end;
@@ -950,7 +746,10 @@ class _SessionTimelinePainter extends CustomPainter {
       canvas,
       plot,
       points
-          .map((point) => (point.timestamp, point.heartRate.toDouble()))
+          .map(
+            (point) =>
+                (point.timestamp, point.heartRate.toDouble(), point.segment),
+          )
           .toList(),
       x,
       colorScheme.primary,
@@ -960,7 +759,8 @@ class _SessionTimelinePainter extends CustomPainter {
       plot,
       [
         for (final point in points)
-          if (point.rmssd != null) (point.timestamp, point.rmssd!),
+          if (point.rmssd != null)
+            (point.timestamp, point.rmssd!, point.segment),
       ],
       x,
       colorScheme.tertiary,
@@ -1029,7 +829,7 @@ class _SessionTimelinePainter extends CustomPainter {
   void _drawSeries(
     Canvas canvas,
     Rect plot,
-    List<(DateTime, double)> values,
+    List<(DateTime, double, int)> values,
     double Function(DateTime) x,
     Color color,
   ) {
@@ -1042,7 +842,7 @@ class _SessionTimelinePainter extends CustomPainter {
       final value = values[index];
       final y = plot.bottom - ((value.$2 - low) / span) * plot.height;
       final point = Offset(x(value.$1), y);
-      if (index == 0) {
+      if (index == 0 || values[index - 1].$3 != value.$3) {
         path.moveTo(point.dx, point.dy);
       } else {
         path.lineTo(point.dx, point.dy);

@@ -2,6 +2,8 @@
 
 ## Status and architecture
 
+Stage 1 software is now implemented: app-owned session controller, bounded manual/automatic recovery, stale-data watchdog, cancellation and continuity logging. Automated validation is recorded in [project-log.md](project-log.md); phone/H10 reliability remains unverified. The original baseline description below is historical. Persistent profiles/quick markers and all later stages remain planned.
+
 Baseline inspected: GitHub commit 3947812. User confirmed Android app builds and runs on work PC/S24 Ultra. Newer local Codex edits may exist; inspect them before implementing. This document records agreed scope, not completed implementation.
 
 Current code includes single-H10 acquisition, explicit start/pause/resume/stop, participant and session description, optional-text markers, live HR/RMSSD plots, raw-preserving RR screening, session JSONL logging, ZIP export, outcome notes, and Android foreground-service support. Recovery, history UI, profile persistence, and simultaneous Flutter straps remain planned. Hardware reliability must be tested.

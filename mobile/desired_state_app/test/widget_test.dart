@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:desired_state_app/main.dart';
 import 'package:desired_state_app/polar_h10_service.dart';
+import 'package:desired_state_app/session_controller.dart';
 
 void main() {
   testWidgets('Desired State collector screen loads', (
@@ -14,14 +15,16 @@ void main() {
     expect(find.text('Desired State'), findsOneWidget);
     expect(find.text('Scan for Polar H10'), findsOneWidget);
     expect(find.text('START RECORDING'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets(
     'collector keeps live data out of a session until recording starts',
     (tester) async {
       final service = _FakePolar();
+      final controller = SessionController(service: service);
       await tester.pumpWidget(
-        MaterialApp(home: CollectorScreen(service: service)),
+        MaterialApp(home: CollectorScreen(controller: controller)),
       );
       service.controller.add(
         PolarHeartRateData(
@@ -42,6 +45,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('START RECORDING'), findsNothing);
       await tester.pumpWidget(const SizedBox());
+      controller.dispose();
     },
   );
 }
