@@ -10,6 +10,36 @@ import 'processing.dart';
 
 typedef JsonRow = Map<String, dynamic>;
 
+/// Dates are inclusive local calendar days; identity remains the saved snapshot.
+class HistoryFilter {
+  const HistoryFilter({this.user, this.identifier = '', this.from, this.to});
+  final String? user;
+  final String identifier;
+  final DateTime? from, to;
+  bool matches(HistoryEntry entry) {
+    if (user != null && entry.participant != user) return false;
+    final id = identifier.trim().toLowerCase();
+    if (id.isNotEmpty &&
+        !entry.id.toLowerCase().contains(id) &&
+        !entry.device.toLowerCase().contains(id)) {
+      return false;
+    }
+    if (from != null || to != null) {
+      final date = entry.started?.toLocal();
+      if (date == null) return false;
+      if (from != null &&
+          date.isBefore(DateTime(from!.year, from!.month, from!.day))) {
+        return false;
+      }
+      if (to != null &&
+          !date.isBefore(DateTime(to!.year, to!.month, to!.day + 1))) {
+        return false;
+      }
+    }
+    return true;
+  }
+}
+
 class HistoryMetadata {
   HistoryMetadata({
     required this.description,

@@ -6,6 +6,24 @@ import 'package:path_provider/path_provider.dart';
 
 enum AnalysisMode { raw, range, screened }
 
+/// Arithmetic summary of finite plotted samples, never of invented gap values.
+class MetricSummary {
+  MetricSummary(Iterable<double?> input) {
+    final values = input.whereType<double>().where((v) => v.isFinite).toList();
+    count = values.length;
+    if (values.isEmpty) return;
+    minimum = values.reduce(math.min);
+    maximum = values.reduce(math.max);
+    final scale = math.max(minimum!.abs(), maximum!.abs());
+    average = scale == 0
+        ? 0
+        : values.fold<double>(0, (sum, v) => sum + (v / scale) / count) * scale;
+    if (!average!.isFinite) average = null;
+  }
+  late final int count;
+  double? minimum, maximum, average;
+}
+
 class ProcessingConfig {
   const ProcessingConfig({
     this.mode = AnalysisMode.raw,
@@ -103,6 +121,8 @@ class ProcessingStore {
   final Future<Directory> Function()? directoryProvider;
   ProcessingConfig config = const ProcessingConfig();
   String? error;
+  bool _loaded = false;
+  bool get ready => _loaded && error == null;
   Future<void>? _loading;
   Future<void> _writes = Future.value();
   File? _file;
@@ -123,6 +143,7 @@ class ProcessingStore {
         );
       }
       error = null;
+      _loaded = true;
     } catch (failure) {
       error = 'Could not load processing settings: $failure';
     }

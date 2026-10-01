@@ -7,11 +7,15 @@ import 'package:desired_state_app/polar_h10_service.dart';
 import 'package:desired_state_app/session_controller.dart';
 
 void main() {
-  testWidgets('Desired State collector screen loads', (
+  testWidgets('History opens first and Live is reachable without a recording', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(const DesiredStateApp());
 
+    expect(find.text('Users & History'), findsOneWidget);
+    expect(find.text('Scan for Polar H10'), findsNothing);
+    await tester.tap(find.text('Live'));
+    await tester.pump();
     expect(find.text('Desired State'), findsOneWidget);
     expect(find.text('Scan for Polar H10'), findsOneWidget);
     expect(find.text('START RECORDING'), findsNothing);

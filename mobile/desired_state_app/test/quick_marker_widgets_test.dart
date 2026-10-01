@@ -119,11 +119,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(TextField), findsNothing);
     expect(find.text('Events (2)'), findsOneWidget);
-    final viewport = tester.widget<InteractiveViewer>(
-      find.byType(InteractiveViewer),
-    );
-    expect(viewport.boundaryMargin, EdgeInsets.zero);
-    expect(viewport.panAxis, PanAxis.horizontal);
+    expect(find.text('Filters & metrics'), findsOneWidget);
     await tester.tap(find.text('Events (2)'));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Add note to Anxious').first);

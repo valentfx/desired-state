@@ -18,13 +18,13 @@ Remaining device checks: restart/update, existing real recordings, keyboard/touc
 
 ## 3. Processing and plots - core software completed
 
-Shared Live/History configurable analysis, persistent versioned defaults, raw/range/screened modes, bounds/deviation/reference/window/sample/pair/usable-fraction gates, prospective reference reset, metric selection and bounded follow/inspect controls are implemented. Acquisition flags and the fixed recording summary remain unchanged. Configuration changes and History applications are logged and exported. See [current-state.md](current-state.md) for the v2 contract and 51-test evidence.
+Shared Live/History configurable analysis, persistent versioned defaults, raw/range/screened modes, bounds/deviation/reference/window/sample/pair/usable-fraction gates, prospective reference reset, metric selection and bounded follow/inspect controls are implemented. Acquisition flags and the Android notification remain fixed-v1; Live now embeds the configurable view with visible-range min/max/average summaries. Configuration changes and History applications are logged and exported. See [current-state.md](current-state.md) for the v2 contract and current 55-test evidence, including direct Live filters/notes/statistics.
 
 Pending device checks: preferences across phone restart/update, keyboard/touch behavior while recording, frozen/return-to-live plots, configuration export and long-session performance. Follow-up features: elapsed-time coverage (current gate is usable sample fraction), fixed Y bounds, desktop hover/wheel, historical configuration picker, segment comparisons and memory/UI-isolate scaling. No ECG-verified NN or physiological-state claim from RR screening alone.
 
-## 4. Users - next
+## 4. Persistent Users/profiles - next
 
-Persistent profiles, stable user IDs, defaults/preferred strap assignments and history filtering by user/device. Preserve historical assignment snapshots when profiles change. Existing participant information supports stages 1-3; simultaneous collection remains separate.
+Persistent profiles, stable user IDs and defaults/preferred strap assignments remain pending. History already opens first and filters existing participant snapshots, session/device ID and local date range. Preserve historical assignment snapshots when profiles change. Existing participant information supports stages 1-3; simultaneous collection remains separate.
 
 Completion: restart/update persistence, historical identity stability, assignment changes and user/device filtering. Add focused navigation when needed, not a prerequisite app-wide restructuring.
 

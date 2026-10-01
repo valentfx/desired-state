@@ -14,7 +14,11 @@ class ProcessingScreen extends StatefulWidget {
     required this.controller,
     this.session,
     this.repository,
+    this.embedded = false,
+    this.header = const [],
   });
+  final bool embedded;
+  final List<Widget> header;
   final SessionController controller;
   final HistorySession? session;
   final SessionHistoryRepository? repository;
@@ -50,6 +54,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
   void initState() {
     super.initState();
     widget.controller.addListener(_changed);
+    _ready = widget.controller.processing.ready;
     _load();
   }
 
@@ -57,8 +62,12 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
     if (mounted) setState(() {});
   }
 
-  Future<void> _load() async {
-    await widget.controller.processing.retry();
+  Future<void> _load({bool retry = false}) async {
+    if (retry) {
+      await widget.controller.processing.retry();
+    } else {
+      await widget.controller.processing.load();
+    }
     if (mounted) {
       setState(() {
         _error = widget.controller.processing.error;
@@ -82,6 +91,11 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
       ),
     );
     if (config == null || !mounted) return;
+    await _apply(config);
+  }
+
+  Future<void> _apply(ProcessingConfig config) async {
+    if (_saving) return;
     setState(() {
       _saving = true;
       _notice = null;
@@ -182,6 +196,253 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
               : clamp(end.subtract(Duration(seconds: _preset!))))
         : clamp(_left ?? first);
     final latest = processor.results.isEmpty ? null : processor.results.last;
+    final content = SafeArea(
+      child: !_ready
+          ? ListView(
+              padding: const EdgeInsets.all(12),
+              children: [
+                ...widget.header,
+                Text(_error ?? 'Loading settings…'),
+                TextButton(
+                  onPressed: () => _load(retry: true),
+                  child: const Text('Retry'),
+                ),
+              ],
+            )
+          : ListView(
+              padding: const EdgeInsets.all(12),
+              children: [
+                ...widget.header,
+                Row(
+                  children: [
+                    const Expanded(child: Text('Filters & metrics')),
+                    if (widget.embedded)
+                      IconButton(
+                        tooltip: 'Processing settings',
+                        onPressed: _ready && !_saving ? _settings : null,
+                        icon: const Icon(Icons.tune),
+                      ),
+                  ],
+                ),
+                Wrap(
+                  spacing: 6,
+                  children: [
+                    for (final mode in AnalysisMode.values)
+                      ChoiceChip(
+                        label: Text(switch (mode) {
+                          AnalysisMode.raw => 'Raw',
+                          AnalysisMode.range => 'Range only',
+                          AnalysisMode.screened => 'Screened',
+                        }),
+                        selected: config.mode == mode,
+                        onSelected: _saving
+                            ? null
+                            : (_) => _apply(
+                                ProcessingConfig.fromJson({
+                                  ...config.toJson(),
+                                  'mode': mode.name,
+                                }),
+                              ),
+                      ),
+                  ],
+                ),
+                const Text(
+                  'Visible-range statistics: finite plotted samples; arithmetic average, not time-weighted.',
+                ),
+                for (final metric in config.metrics)
+                  _summary(
+                    metric,
+                    metric == 'HR'
+                        ? hr
+                        : [
+                            for (final r in processor.results)
+                              HistoryPoint(
+                                r.input.time,
+                                r.values[metric],
+                                r.plotSegment,
+                              ),
+                          ],
+                    start,
+                    end,
+                  ),
+                if (!widget.embedded && controller.sessionLogger != null)
+                  Text(
+                    '${controller.recordingState.name} · ${controller.connectionStatus} · last data ${controller.lastDataAge?.inSeconds ?? '-'}s',
+                  ),
+                if (widget.session != null)
+                  Text(
+                    'Saved snapshot: ${widget.session!.entry.participant} · ${widget.session!.entry.id}',
+                  ),
+                if (_saving) const Text('Saving settings…'),
+                if (_notice != null) Text(_notice!),
+                if (_error != null)
+                  Text(
+                    _error!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                if (widget.session != null &&
+                    widget.session!.warnings.isNotEmpty)
+                  Text('Data warnings: ${widget.session!.warnings.join('; ')}'),
+                Text(
+                  '${config.mode.name} · ${ProcessingConfig.version} · ${config.windowSeconds}s receipt-time window',
+                ),
+                Text(
+                  'Bounds ${config.minimum}–${config.maximum} ms · deviation ${config.deviation}% · reference ${config.reference} RR · minimum ${config.minimumSamples} samples / ${config.minimumPairs} pairs / ${config.coverage}% usable RR',
+                ),
+                const Text(
+                  'Derived view only. Recorded flags stay unchanged. Gaps restart warm-up. Usable percentage is sample acceptance, not time coverage. Screening is provisional, not ECG-verified NN.',
+                ),
+                if (config.mode == AnalysisMode.screened)
+                  Text(
+                    'Reference resets after ${config.reference} consecutive in-range deviations clustered within the threshold; prior rejected RR remain excluded.',
+                  ),
+                if (latest != null)
+                  Text(
+                    'Latest window at ${latest.input.time.toLocal()}: ${latest.usable}/${latest.total} usable · ${latest.pairs} adjacent pairs · ${latest.missing ?? 'metrics available'}',
+                  ),
+                if (inputs.isEmpty)
+                  const Text(
+                    'No recorded RR yet. Start recording on Live or open a saved session.',
+                  ),
+                Wrap(
+                  spacing: 6,
+                  children: [
+                    for (final seconds in <int?>[30, 60, 300, null])
+                      ChoiceChip(
+                        label: Text(seconds == null ? 'All' : '${seconds}s'),
+                        selected: _follow && _preset == seconds,
+                        onSelected: (_) => setState(() {
+                          _follow = true;
+                          _preset = seconds;
+                          _selected = null;
+                        }),
+                      ),
+                    TextButton(
+                      onPressed: () => setState(() {
+                        _follow = true;
+                        _preset = null;
+                        _selected = null;
+                      }),
+                      child: Text(
+                        widget.session == null
+                            ? 'Back to live / Fit data'
+                            : 'Fit data',
+                      ),
+                    ),
+                  ],
+                ),
+                Text(
+                  '${_follow ? (widget.session == null ? 'Following live' : 'Full/preset range') : 'Inspecting'} · ${start.toLocal()} – ${end.toLocal()}',
+                ),
+                if (times.length > 1)
+                  RangeSlider(
+                    values: RangeValues(
+                      times
+                          .indexWhere((t) => !t.isBefore(start))
+                          .clamp(0, times.length - 1)
+                          .toDouble(),
+                      times
+                          .lastIndexWhere((t) => !t.isAfter(end))
+                          .clamp(0, times.length - 1)
+                          .toDouble(),
+                    ),
+                    min: 0,
+                    max: (times.length - 1).toDouble(),
+                    divisions: times.length - 1,
+                    onChanged: (value) {
+                      if (value.end - value.start < 1) return;
+                      setState(() {
+                        _follow = false;
+                        _left = times[value.start.round()];
+                        _right = times[value.end.round()];
+                        _selected = null;
+                      });
+                    },
+                  ),
+                for (final metric in config.metrics) ...[
+                  HistoryPlot(
+                    title: metric,
+                    unit: _unit(metric),
+                    points: metric == 'HR'
+                        ? hr
+                        : [
+                            for (final (i, r) in processor.results.indexed)
+                              HistoryPoint(
+                                r.input.time,
+                                r.values[metric],
+                                r.plotSegment,
+                                sourceIndex: i,
+                              ),
+                          ],
+                    start: start,
+                    end: end,
+                    events: events,
+                    color: _color(metric),
+                    cursor: _selected?.time,
+                    onInspect: (point) => setState(() {
+                      _selected = point;
+                      _metric = metric;
+                      _follow = false;
+                      _left = start;
+                      _right = end;
+                    }),
+                  ),
+                  if (_selected != null && _metric == metric)
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '$metric: ${_selected!.value?.toStringAsFixed(3) ?? 'unavailable'} ${_unit(metric)} · ${_selected!.time.toUtc()}',
+                            ),
+                            if (_selected!.sourceIndex != null) ...[
+                              _inspection(
+                                processor.results[_selected!.sourceIndex!],
+                              ),
+                              Wrap(
+                                children: [
+                                  for (final delta in [-1, 1])
+                                    TextButton(
+                                      onPressed:
+                                          _selected!.sourceIndex! + delta < 0 ||
+                                              _selected!.sourceIndex! + delta >=
+                                                  processor.results.length
+                                          ? null
+                                          : () {
+                                              final index =
+                                                  _selected!.sourceIndex! +
+                                                  delta;
+                                              final r =
+                                                  processor.results[index];
+                                              setState(() {
+                                                _selected = HistoryPoint(
+                                                  r.input.time,
+                                                  r.values[metric],
+                                                  r.plotSegment,
+                                                  sourceIndex: index,
+                                                );
+                                              });
+                                            },
+                                      child: Text(
+                                        delta < 0 ? 'Previous RR' : 'Next RR',
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ],
+            ),
+    );
+    if (widget.embedded) return content;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Processing & plots'),
@@ -193,200 +454,34 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
           ),
         ],
       ),
-      body: SafeArea(
-        child: !_ready
-            ? Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(_error ?? 'Loading settings…'),
-                    TextButton(onPressed: _load, child: const Text('Retry')),
-                  ],
-                ),
-              )
-            : ListView(
-                padding: const EdgeInsets.all(12),
-                children: [
-                  if (controller.sessionLogger != null)
-                    Text(
-                      '${controller.recordingState.name} · ${controller.connectionStatus} · last data ${controller.lastDataAge?.inSeconds ?? '-'}s',
-                    ),
-                  if (widget.session != null)
-                    Text(
-                      'Saved snapshot: ${widget.session!.entry.participant} · ${widget.session!.entry.id}',
-                    ),
-                  if (_saving) const Text('Saving settings…'),
-                  if (_notice != null) Text(_notice!),
-                  if (_error != null)
-                    Text(
-                      _error!,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
-                      ),
-                    ),
-                  if (widget.session != null &&
-                      widget.session!.warnings.isNotEmpty)
-                    Text(
-                      'Data warnings: ${widget.session!.warnings.join('; ')}',
-                    ),
-                  Text(
-                    '${config.mode.name} · ${ProcessingConfig.version} · ${config.windowSeconds}s receipt-time window',
-                  ),
-                  Text(
-                    'Bounds ${config.minimum}–${config.maximum} ms · deviation ${config.deviation}% · reference ${config.reference} RR · minimum ${config.minimumSamples} samples / ${config.minimumPairs} pairs / ${config.coverage}% usable RR',
-                  ),
-                  const Text(
-                    'Derived view only. Recorded flags stay unchanged. Gaps restart warm-up. Usable percentage is sample acceptance, not time coverage. Screening is provisional, not ECG-verified NN.',
-                  ),
-                  if (config.mode == AnalysisMode.screened)
-                    Text(
-                      'Reference resets after ${config.reference} consecutive in-range deviations clustered within the threshold; prior rejected RR remain excluded.',
-                    ),
-                  if (latest != null)
-                    Text(
-                      'Latest window at ${latest.input.time.toLocal()}: ${latest.usable}/${latest.total} usable · ${latest.pairs} adjacent pairs · ${latest.missing ?? 'metrics available'}',
-                    ),
-                  if (inputs.isEmpty)
-                    const Text(
-                      'No recorded RR yet. Start recording on Live or open a saved session.',
-                    ),
-                  Wrap(
-                    spacing: 6,
-                    children: [
-                      for (final seconds in <int?>[30, 60, 300, null])
-                        ChoiceChip(
-                          label: Text(seconds == null ? 'All' : '${seconds}s'),
-                          selected: _follow && _preset == seconds,
-                          onSelected: (_) => setState(() {
-                            _follow = true;
-                            _preset = seconds;
-                            _selected = null;
-                          }),
-                        ),
-                      TextButton(
-                        onPressed: () => setState(() {
-                          _follow = true;
-                          _preset = null;
-                          _selected = null;
-                        }),
-                        child: Text(
-                          widget.session == null
-                              ? 'Back to live / Fit data'
-                              : 'Fit data',
-                        ),
-                      ),
-                    ],
-                  ),
-                  Text(
-                    '${_follow ? (widget.session == null ? 'Following live' : 'Full/preset range') : 'Inspecting'} · ${start.toLocal()} – ${end.toLocal()}',
-                  ),
-                  if (times.length > 1)
-                    RangeSlider(
-                      values: RangeValues(
-                        times
-                            .indexWhere((t) => !t.isBefore(start))
-                            .clamp(0, times.length - 1)
-                            .toDouble(),
-                        times
-                            .lastIndexWhere((t) => !t.isAfter(end))
-                            .clamp(0, times.length - 1)
-                            .toDouble(),
-                      ),
-                      min: 0,
-                      max: (times.length - 1).toDouble(),
-                      divisions: times.length - 1,
-                      onChanged: (value) {
-                        if (value.end - value.start < 1) return;
-                        setState(() {
-                          _follow = false;
-                          _left = times[value.start.round()];
-                          _right = times[value.end.round()];
-                          _selected = null;
-                        });
-                      },
-                    ),
-                  for (final metric in config.metrics) ...[
-                    HistoryPlot(
-                      title: metric,
-                      unit: _unit(metric),
-                      points: metric == 'HR'
-                          ? hr
-                          : [
-                              for (final (i, r) in processor.results.indexed)
-                                HistoryPoint(
-                                  r.input.time,
-                                  r.values[metric],
-                                  r.plotSegment,
-                                  sourceIndex: i,
-                                ),
-                            ],
-                      start: start,
-                      end: end,
-                      events: events,
-                      color: _color(metric),
-                      cursor: _selected?.time,
-                      onInspect: (point) => setState(() {
-                        _selected = point;
-                        _metric = metric;
-                        _follow = false;
-                        _left = start;
-                        _right = end;
-                      }),
-                    ),
-                    if (_selected != null && _metric == metric)
-                      Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                '$metric: ${_selected!.value?.toStringAsFixed(3) ?? 'unavailable'} ${_unit(metric)} · ${_selected!.time.toUtc()}',
-                              ),
-                              if (_selected!.sourceIndex != null) ...[
-                                _inspection(
-                                  processor.results[_selected!.sourceIndex!],
-                                ),
-                                Wrap(
-                                  children: [
-                                    for (final delta in [-1, 1])
-                                      TextButton(
-                                        onPressed:
-                                            _selected!.sourceIndex! + delta <
-                                                    0 ||
-                                                _selected!.sourceIndex! +
-                                                        delta >=
-                                                    processor.results.length
-                                            ? null
-                                            : () {
-                                                final index =
-                                                    _selected!.sourceIndex! +
-                                                    delta;
-                                                final r =
-                                                    processor.results[index];
-                                                setState(() {
-                                                  _selected = HistoryPoint(
-                                                    r.input.time,
-                                                    r.values[metric],
-                                                    r.plotSegment,
-                                                    sourceIndex: index,
-                                                  );
-                                                });
-                                              },
-                                        child: Text(
-                                          delta < 0 ? 'Previous RR' : 'Next RR',
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                      ),
-                  ],
-                ],
-              ),
+      body: content,
+    );
+  }
+
+  Widget _summary(
+    String metric,
+    List<HistoryPoint> points,
+    DateTime start,
+    DateTime end,
+  ) {
+    final summary = MetricSummary(
+      points
+          .where((p) => !p.time.isBefore(start) && !p.time.isAfter(end))
+          .map((p) => p.value),
+    );
+    String format(double? value) => value?.toStringAsFixed(2) ?? '--';
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('$metric (${_unit(metric)}) - ${summary.count} values'),
+            Text(
+              'Min ${format(summary.minimum)} | Max ${format(summary.maximum)} | Avg ${format(summary.average)}',
+            ),
+          ],
+        ),
       ),
     );
   }

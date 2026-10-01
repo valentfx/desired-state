@@ -7,7 +7,17 @@ import 'session_history.dart';
 import 'processing_screen.dart';
 
 class HistoryScreen extends StatefulWidget {
-  const HistoryScreen({super.key, required this.controller, this.repository});
+  const HistoryScreen({
+    super.key,
+    required this.controller,
+    this.repository,
+    this.home = false,
+    this.revision = 0,
+    this.onLive,
+  });
+  final bool home;
+  final int revision;
+  final VoidCallback? onLive;
   final SessionController controller;
   final SessionHistoryRepository? repository;
   @override
@@ -23,13 +33,38 @@ class _HistoryScreenState extends State<HistoryScreen> {
       );
   late Future<List<HistoryEntry>> _sessions = repository.list();
   String _query = '';
+  String? _user;
+  final _identifier = TextEditingController();
+  DateTimeRange? _dates;
+  @override
+  void didUpdateWidget(covariant HistoryScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.revision != oldWidget.revision) _refresh();
+  }
+
+  @override
+  void dispose() {
+    _identifier.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickDates() async {
+    final range = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(1900),
+      lastDate: DateTime(2200),
+      initialDateRange: _dates,
+    );
+    if (range != null && mounted) setState(() => _dates = range);
+  }
+
   void _refresh() => setState(() {
     _sessions = repository.list();
   });
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
-      title: const Text('History'),
+      title: Text(widget.home ? 'Users & History' : 'History'),
       actions: [
         IconButton(
           tooltip: 'Refresh sessions',
@@ -41,7 +76,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
     body: SafeArea(
       child: Column(
         children: [
-          RecordingHistoryBanner(controller: widget.controller),
+          RecordingHistoryBanner(
+            controller: widget.controller,
+            onLive: widget.onLive,
+          ),
           Padding(
             padding: const EdgeInsets.all(12),
             child: TextField(
@@ -66,7 +104,18 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
+                final filter = HistoryFilter(
+                  user: _user,
+                  identifier: _identifier.text,
+                  from: _dates?.start,
+                  to: _dates?.end,
+                );
+                final users = {
+                  ...snapshot.data!.map((e) => e.participant),
+                  ?_user,
+                }.toList()..sort();
                 final entries = snapshot.data!
+                    .where(filter.matches)
                     .where(
                       (entry) => [
                         entry.id,
@@ -83,13 +132,77 @@ class _HistoryScreenState extends State<HistoryScreen> {
                       ].join(' ').toLowerCase().contains(_query),
                     )
                     .toList();
-                if (entries.isEmpty) {
-                  return const Center(child: Text('No saved sessions found.'));
-                }
                 return ListView.builder(
-                  itemCount: entries.length,
+                  itemCount: entries.isEmpty ? 2 : entries.length + 1,
                   itemBuilder: (context, index) {
-                    final entry = entries[index];
+                    if (index == 0) {
+                      return ExpansionTile(
+                        title: const Text('Filter by user, ID, date'),
+                        subtitle: Text(
+                          '${_user ?? 'All users'} · ${_dates == null ? 'All dates' : '${_dates!.start.toLocal().toString().split(' ').first} to ${_dates!.end.toLocal().toString().split(' ').first}'} · ${entries.length} sessions',
+                        ),
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              children: [
+                                DropdownButton<String>(
+                                  isExpanded: true,
+                                  value: _user ?? '',
+                                  items: [
+                                    const DropdownMenuItem(
+                                      value: '',
+                                      child: Text('All users'),
+                                    ),
+                                    for (final user in users.where(
+                                      (u) => u.isNotEmpty,
+                                    ))
+                                      DropdownMenuItem(
+                                        value: user,
+                                        child: Text(user),
+                                      ),
+                                  ],
+                                  onChanged: (value) => setState(
+                                    () => _user = value == '' ? null : value,
+                                  ),
+                                ),
+                                TextField(
+                                  controller: _identifier,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Session or device ID',
+                                  ),
+                                  onChanged: (_) => setState(() {}),
+                                ),
+                                Wrap(
+                                  spacing: 8,
+                                  children: [
+                                    TextButton.icon(
+                                      onPressed: _pickDates,
+                                      icon: const Icon(Icons.date_range),
+                                      label: const Text('Date range'),
+                                    ),
+                                    TextButton(
+                                      onPressed: () => setState(() {
+                                        _user = null;
+                                        _dates = null;
+                                        _identifier.clear();
+                                      }),
+                                      child: const Text('Clear filters'),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      );
+                    }
+                    if (entries.isEmpty) {
+                      return const ListTile(
+                        title: Text('No saved sessions found.'),
+                      );
+                    }
+                    final entry = entries[index - 1];
                     final state = repository.isActive(entry.id)
                         ? 'Recording / snapshot'
                         : entry.ended && entry.warnings.isEmpty
@@ -114,6 +227,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                     entry: entry,
                                     repository: repository,
                                     controller: widget.controller,
+                                    onLive: widget.onLive,
                                   ),
                                 ),
                               );
@@ -132,8 +246,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
 }
 
 class RecordingHistoryBanner extends StatelessWidget {
-  const RecordingHistoryBanner({super.key, required this.controller});
+  const RecordingHistoryBanner({
+    super.key,
+    required this.controller,
+    this.onLive,
+  });
   final SessionController controller;
+  final VoidCallback? onLive;
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: controller,
@@ -147,8 +266,9 @@ class RecordingHistoryBanner extends StatelessWidget {
             '${controller.recordingState == RecordingState.paused ? 'Paused' : 'Recording continues'} · ${controller.connectionStatus}',
           ),
           trailing: TextButton(
-            onPressed: () =>
-                Navigator.popUntil(context, (route) => route.isFirst),
+            onPressed:
+                onLive ??
+                () => Navigator.popUntil(context, (route) => route.isFirst),
             child: const Text('Live'),
           ),
         ),
@@ -163,7 +283,9 @@ class HistoryDetailScreen extends StatefulWidget {
     required this.entry,
     required this.repository,
     required this.controller,
+    this.onLive,
   });
+  final VoidCallback? onLive;
   final HistoryEntry entry;
   final SessionHistoryRepository repository;
   final SessionController controller;
@@ -256,7 +378,10 @@ class _HistoryDetailScreenState extends State<HistoryDetailScreen> {
     body: SafeArea(
       child: Column(
         children: [
-          RecordingHistoryBanner(controller: widget.controller),
+          RecordingHistoryBanner(
+            controller: widget.controller,
+            onLive: widget.onLive,
+          ),
           Expanded(
             child: FutureBuilder<HistorySession>(
               future: _loading,
@@ -553,7 +678,11 @@ class HistoryMetadataEditor extends StatefulWidget {
     required this.entry,
     required this.repository,
     this.eventId,
+    this.controller,
+    this.onLive,
   });
+  final SessionController? controller;
+  final VoidCallback? onLive;
   final HistoryEntry entry;
   final SessionHistoryRepository repository;
   final String? eventId;
@@ -633,6 +762,11 @@ class _HistoryMetadataEditorState extends State<HistoryMetadataEditor> {
       child: ListView(
         padding: const EdgeInsets.all(20),
         children: [
+          if (widget.controller != null)
+            RecordingHistoryBanner(
+              controller: widget.controller!,
+              onLive: widget.onLive,
+            ),
           if (_error != null) Text(_error!),
           if (widget.eventId == null)
             TextField(
