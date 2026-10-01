@@ -401,7 +401,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(home: CollectorScreen(controller: controller)),
       );
-      expect(find.text('Reconnect H10'), findsOneWidget);
+      expect(find.byTooltip('Device connection'), findsOneWidget);
       expect(find.textContaining('last data'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
       polar.emit([1000, 1010, 1020]);

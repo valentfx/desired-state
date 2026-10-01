@@ -118,8 +118,10 @@ void main() {
     });
     await tester.pumpAndSettle();
     expect(find.byType(TextField), findsNothing);
+    expect(find.textContaining('Filters & metrics'), findsOneWidget);
+    await tester.tap(find.byTooltip('More markers and events'));
+    await tester.pumpAndSettle();
     expect(find.text('Events (2)'), findsOneWidget);
-    expect(find.text('Filters & metrics'), findsOneWidget);
     await tester.tap(find.text('Events (2)'));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Add note to Anxious').first);

@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 
 import 'rr_history.dart';
@@ -11,6 +9,7 @@ import 'history_screen.dart';
 import 'processing_screen.dart';
 import 'session_history.dart';
 import 'app_navigation.dart';
+import 'device_screen.dart';
 
 void main() {
   runApp(const DesiredStateApp());
@@ -109,14 +108,10 @@ class CollectorScreen extends StatefulWidget {
 
 class _CollectorScreenState extends State<CollectorScreen> {
   late final SessionController _controller;
-  List<ScanResult> _scanResults = [];
-  bool _scanning = false;
   bool _exporting = false;
   bool _showConnect = false;
-  String? _scanStatus;
-  bool get _connecting => _controller.connecting;
   bool get _connected => _controller.connected;
-  String get _status => _controller.error ?? _scanStatus ?? _controller.status;
+  String get _status => _controller.error ?? _controller.status;
   String get _deviceName => _controller.deviceName;
 
   RecordingState get _recordingState => _controller.recordingState;
@@ -141,68 +136,11 @@ class _CollectorScreenState extends State<CollectorScreen> {
     if (mounted) setState(() {});
   }
 
-  Future<bool> _requestPermissions() async {
-    final results = await [
-      Permission.bluetoothScan,
-      Permission.bluetoothConnect,
-      Permission.notification,
-    ].request();
-
-    final scanOk = results[Permission.bluetoothScan]?.isGranted ?? false;
-    final connectOk = results[Permission.bluetoothConnect]?.isGranted ?? false;
-
-    return scanOk && connectOk;
-  }
-
-  Future<void> _scan() async {
-    final permissionOk = await _requestPermissions();
-
-    if (!permissionOk) {
-      setState(() {
-        _scanStatus = 'Bluetooth permission denied';
-      });
-      return;
-    }
-
-    setState(() {
-      _scanning = true;
-      _scanResults = [];
-      _scanStatus = 'Scanning for Polar H10...';
-    });
-
-    try {
-      final results = await _controller.polar.scan();
-
-      if (!mounted) return;
-
-      setState(() {
-        _scanResults = results;
-        _scanStatus = results.isEmpty
-            ? 'No Polar H10 found'
-            : 'Found ${results.length} device(s)';
-      });
-    } catch (e) {
-      if (!mounted) return;
-
-      setState(() {
-        _scanStatus = 'Scan error: $e';
-      });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _scanning = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _connect(ScanResult result) async {
-    _scanStatus = null;
-    await _controller.connect(result.device);
-  }
-
-  Future<void> _disconnect() => _controller.disconnect();
-
+  void _openDevice() => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => DeviceScreen(controller: _controller),
+    ),
+  );
   @override
   void dispose() {
     _controller.removeListener(_refresh);
@@ -345,6 +283,11 @@ class _CollectorScreenState extends State<CollectorScreen> {
       appBar: AppBar(
         title: const Text('Live'),
         actions: [
+          IconButton(
+            tooltip: 'Device connection',
+            onPressed: _openDevice,
+            icon: const Icon(Icons.bluetooth),
+          ),
           if (_sessionLogger != null || _lastSessionLogger != null)
             IconButton(
               tooltip: 'Session notes',
@@ -421,26 +364,12 @@ class _CollectorScreenState extends State<CollectorScreen> {
           icon: const Icon(Icons.play_arrow),
           label: const Text('START RECORDING'),
         ),
-        TextButton(onPressed: _disconnect, child: const Text('Disconnect')),
       ] else ...[
         FilledButton.icon(
-          onPressed: _scanning ? null : _scan,
-          icon: const Icon(Icons.bluetooth_searching),
-          label: Text(_scanning ? 'Scanning…' : 'Scan for Polar H10'),
+          onPressed: _openDevice,
+          icon: const Icon(Icons.bluetooth),
+          label: const Text('Connect H10'),
         ),
-        for (final result in _scanResults)
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.monitor_heart),
-              title: Text(
-                result.device.platformName.isEmpty
-                    ? 'Polar / BLE device'
-                    : result.device.platformName,
-              ),
-              subtitle: Text(result.device.remoteId.str),
-              onTap: _connecting ? null : () => _connect(result),
-            ),
-          ),
       ],
     ],
   );
@@ -479,35 +408,27 @@ class _CollectorScreenState extends State<CollectorScreen> {
                   Text(_formatDuration(_sessionElapsed)),
                 ],
               ),
-              Text(
-                '${_controller.connectionStatus} | last data ${_controller.lastDataAge?.inSeconds.toString() ?? '--'}s ago',
+              InkWell(
+                onTap: _openDevice,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Text(
+                    '${_controller.connectionStatus} | last data ${_controller.lastDataAge?.inSeconds.toString() ?? '--'}s ago',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               ),
-              if (_controller.error != null) Text(_controller.error!),
-              Wrap(
-                spacing: 8,
-                children: [
-                  TextButton.icon(
-                    onPressed: _openSessionNotes,
-                    icon: const Icon(Icons.edit_note),
-                    label: const Text('Enter / edit session notes'),
-                  ),
-                  TextButton.icon(
-                    onPressed: _controller.canReconnect
-                        ? _controller.reconnect
-                        : null,
-                    icon: const Icon(Icons.bluetooth_connected),
-                    label: const Text('Reconnect H10'),
-                  ),
-                  TextButton(
-                    onPressed: _controller.busy ? null : _disconnect,
-                    child: const Text('Disconnect'),
-                  ),
-                ],
-              ),
-              QuickMarkerBar(controller: _controller),
+              if (_controller.error != null)
+                Text(
+                  _controller.error!,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
             ],
           ),
         ),
+        QuickMarkerBar(controller: _controller, compact: true),
         Row(
           children: [
             Expanded(
@@ -566,11 +487,11 @@ class _CollectorScreenState extends State<CollectorScreen> {
           child: const Text('NEW SESSION'),
         ),
         if (!_connected)
-          TextButton(
-            onPressed: () => setState(() => _showConnect = true),
-            child: const Text('Connect H10'),
-          ),
-        TextButton(onPressed: _disconnect, child: const Text('Disconnect')),
+          TextButton(onPressed: _openDevice, child: const Text('Connect H10')),
+        TextButton(
+          onPressed: _openDevice,
+          child: const Text('Device connection'),
+        ),
       ],
     ),
   );

@@ -240,7 +240,12 @@ class MarkerEventsScreen extends StatelessWidget {
 }
 
 class QuickMarkerBar extends StatefulWidget {
-  const QuickMarkerBar({super.key, required this.controller});
+  const QuickMarkerBar({
+    super.key,
+    required this.controller,
+    this.compact = false,
+  });
+  final bool compact;
   final SessionController controller;
   @override
   State<QuickMarkerBar> createState() => _QuickMarkerBarState();
@@ -284,65 +289,110 @@ class _QuickMarkerBarState extends State<QuickMarkerBar> {
     final store = controller.quickMarkers;
     return ListenableBuilder(
       listenable: store,
-      builder: (context, _) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Expanded(child: Text('Quick markers')),
-              TextButton(
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute<void>(
-                    builder: (_) => MarkerEventsScreen(controller: controller),
-                  ),
-                ),
-                child: Text('Events (${controller.recordedMarkers.length})'),
-              ),
-              IconButton(
-                tooltip: 'Manage quick markers',
-                onPressed: store.ready
-                    ? () => Navigator.push(
-                        context,
-                        MaterialPageRoute<void>(
-                          builder: (_) => QuickMarkerManager(store: store),
-                        ),
-                      )
-                    : null,
-                icon: const Icon(Icons.edit_outlined),
-              ),
-            ],
-          ),
-          if (!store.ready) ...[
-            Text(store.error ?? 'Loading quick markers…'),
-            if (store.error != null)
-              TextButton(
-                onPressed: store.retryLoad,
-                child: const Text('Retry loading markers'),
-              ),
-          ] else if (store.items.isEmpty)
-            const Text('Add buttons with Manage quick markers.')
-          else
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  for (final item in store.items)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 8),
+      builder: (context, _) => widget.compact && store.ready
+          ? Row(
+              children: [
+                for (final item in store.items.take(2))
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 4),
                       child: FilledButton.tonal(
                         onPressed:
                             controller.sessionLogger != null && !controller.busy
                             ? () => _record(item)
                             : null,
-                        child: Text(item.label),
+                        child: Text(
+                          item.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ),
-                ],
-              ),
+                  ),
+                IconButton(
+                  tooltip: 'More markers and events',
+                  icon: const Icon(Icons.more_horiz),
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => Scaffold(
+                        appBar: AppBar(title: const Text('Markers & events')),
+                        body: ListenableBuilder(
+                          listenable: controller,
+                          builder: (context, _) => SingleChildScrollView(
+                            child: QuickMarkerBar(controller: controller),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Expanded(child: Text('Quick markers')),
+                    TextButton(
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) =>
+                              MarkerEventsScreen(controller: controller),
+                        ),
+                      ),
+                      child: Text(
+                        'Events (${controller.recordedMarkers.length})',
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Manage quick markers',
+                      onPressed: store.ready
+                          ? () => Navigator.push(
+                              context,
+                              MaterialPageRoute<void>(
+                                builder: (_) =>
+                                    QuickMarkerManager(store: store),
+                              ),
+                            )
+                          : null,
+                      icon: const Icon(Icons.edit_outlined),
+                    ),
+                  ],
+                ),
+                if (!store.ready) ...[
+                  Text(store.error ?? 'Loading quick markers…'),
+                  if (store.error != null)
+                    TextButton(
+                      onPressed: store.retryLoad,
+                      child: const Text('Retry loading markers'),
+                    ),
+                ] else if (store.items.isEmpty)
+                  const Text('Add buttons with Manage quick markers.')
+                else
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        for (final item in store.items)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: FilledButton.tonal(
+                              onPressed:
+                                  controller.sessionLogger != null &&
+                                      !controller.busy
+                                  ? () => _record(item)
+                                  : null,
+                              child: Text(item.label),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+              ],
             ),
-        ],
-      ),
     );
   }
 }

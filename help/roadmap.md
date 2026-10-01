@@ -22,6 +22,10 @@ Shared Live/History configurable analysis, persistent versioned defaults, raw/ra
 
 Pending device checks: preferences across phone restart/update, keyboard/touch behavior while recording, frozen/return-to-live plots, configuration export and long-session performance. Follow-up features: elapsed-time coverage (current gate is usable sample fraction), fixed Y bounds, desktop hover/wheel, historical configuration picker, segment comparisons and memory/UI-isolate scaling. No ECG-verified NN or physiological-state claim from RR screening alone.
 
+### Live usability follow-up - software completed 2026-10-01
+
+Separate device discovery/reconnect screen, single relative-trend overlay (initial BPM/RMSSD), one-line summaries, compact quick markers, Basic/Advanced/Preset settings and validated local/portable JSON presets are implemented. Existing preferences and raw files are preserved. Next validate the new APK on phone: layout/readability, preset persistence, notes/markers and reconnect while recording. Native-unit detailed plots remain available; clipboard JSON transfer is implemented, OS preset file pickers are not. Current automated evidence: 58 tests, clean analysis; see current state/log for details.
+
 ## 4. Persistent Users/profiles - next
 
 Persistent profiles, stable user IDs and defaults/preferred strap assignments remain pending. History already opens first and filters existing participant snapshots, session/device ID and local date range. Preserve historical assignment snapshots when profiles change. Existing participant information supports stages 1-3; simultaneous collection remains separate.

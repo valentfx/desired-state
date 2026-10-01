@@ -17,6 +17,9 @@ void main() {
     await tester.tap(find.text('Live'));
     await tester.pump();
     expect(find.text('Desired State'), findsOneWidget);
+    expect(find.text('Scan for Polar H10'), findsNothing);
+    await tester.tap(find.text('Connect H10'));
+    await tester.pumpAndSettle();
     expect(find.text('Scan for Polar H10'), findsOneWidget);
     expect(find.text('START RECORDING'), findsNothing);
     await tester.pumpWidget(const SizedBox());

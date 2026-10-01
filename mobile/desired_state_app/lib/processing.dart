@@ -35,7 +35,7 @@ class ProcessingConfig {
     this.minimumSamples = 3,
     this.minimumPairs = 1,
     this.coverage = 50,
-    this.metrics = const ['HR', 'RR', 'RMSSD'],
+    this.metrics = const ['HR', 'RMSSD'],
   });
   static const version = 'rr-configurable-v2';
   final AnalysisMode mode;

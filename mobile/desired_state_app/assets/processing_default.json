@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "processing_version": "rr-configurable-v2",
+  "purpose": "derived_view_only",
+  "recorded_flags_processing": "mobile-median9-25pct-300-2000-v1",
+  "mode": "screened",
+  "minimum_ms": 300,
+  "maximum_ms": 2000,
+  "deviation_percent": 25,
+  "reference_count": 9,
+  "window_seconds": 60,
+  "minimum_samples": 3,
+  "minimum_pairs": 1,
+  "usable_percent": 50,
+  "metrics": ["HR", "RMSSD"]
+}

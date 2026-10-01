@@ -1,6 +1,9 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import 'processing_presets.dart';
 
 import 'processing.dart';
 import 'session_controller.dart';
@@ -35,6 +38,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
   HistoryPoint? _selected;
   String _metric = '';
   int? _preset;
+  DateTime? _overlayCursor;
   late final List<RrInput>? _saved = widget.session?.rr
       .map(
         (r) => RrInput(
@@ -54,6 +58,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
   void initState() {
     super.initState();
     widget.controller.addListener(_changed);
+    if (widget.embedded) _preset = 60;
     _ready = widget.controller.processing.ready;
     _load();
   }
@@ -86,8 +91,12 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
     final config = await Navigator.push<ProcessingConfig>(
       context,
       MaterialPageRoute(
-        builder: (_) =>
-            ProcessingEditor(config: widget.controller.processing.config),
+        builder: (_) => ProcessingEditor(
+          config: widget.controller.processing.config,
+          presets: ProcessingPresets(
+            directoryProvider: widget.controller.directoryProvider,
+          ),
+        ),
       ),
     );
     if (config == null || !mounted) return;
@@ -146,6 +155,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
       _configuration = key;
       _sessionId = sessionId;
       _selected = null;
+      _overlayCursor = null;
     }
     final processor = _processor!;
     for (var i = processor.results.length; i < inputs.length; i++) {
@@ -196,6 +206,154 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
               : clamp(end.subtract(Duration(seconds: _preset!))))
         : clamp(_left ?? first);
     final latest = processor.results.isEmpty ? null : processor.results.last;
+    if (widget.embedded && _ready) {
+      final series = <String, List<HistoryPoint>>{
+        for (final metric in config.metrics.take(3))
+          metric: metric == 'HR'
+              ? hr
+              : [
+                  for (final r in processor.results)
+                    HistoryPoint(r.input.time, r.values[metric], r.plotSegment),
+                ],
+      };
+      String format(double? value) =>
+          value != null && value.isFinite ? value.toStringAsFixed(1) : '--';
+      final summaries = <Widget>[];
+      for (final entry in series.entries) {
+        final visible = entry.value
+            .where((p) => !p.time.isBefore(start) && !p.time.isAfter(end))
+            .toList();
+        final summary = MetricSummary(visible.map((p) => p.value));
+        HistoryPoint? selected;
+        if (_overlayCursor != null && visible.isNotEmpty) {
+          selected = visible.reduce(
+            (a, b) =>
+                a.time.difference(_overlayCursor!).abs() <=
+                    b.time.difference(_overlayCursor!).abs()
+                ? a
+                : b,
+          );
+        }
+        final current = selected ?? (visible.isEmpty ? null : visible.last);
+        summaries.add(
+          Tooltip(
+            message:
+                'Finite visible samples; arithmetic, not time-weighted average. Current/inspected sample at ${current?.time.toLocal() ?? '--'}',
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                '${entry.key == 'HR' ? 'BPM' : entry.key} ${format(current?.value)} ${_unit(entry.key)} | min ${format(summary.minimum)} avg ${format(summary.average)} max ${format(summary.maximum)}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: _color(entry.key),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        );
+      }
+      Widget panel(double height) => SizedBox(
+        height: height,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ...widget.header,
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton.icon(
+                    onPressed: _saving ? null : _settings,
+                    icon: const Icon(Icons.tune, size: 18),
+                    label: Text(
+                      'Filters & metrics: ${config.mode.name}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+                DropdownButton<int>(
+                  value: _preset ?? 0,
+                  items: [
+                    for (final seconds in [30, 60, 300, 0])
+                      DropdownMenuItem(
+                        value: seconds,
+                        child: Text(seconds == 0 ? 'All' : '${seconds}s'),
+                      ),
+                  ],
+                  onChanged: (v) => setState(() {
+                    _preset = v == 0 ? null : v;
+                    _follow = true;
+                    _overlayCursor = null;
+                  }),
+                ),
+                IconButton(
+                  tooltip: 'Back to live',
+                  onPressed: () => setState(() {
+                    _follow = true;
+                    _overlayCursor = null;
+                  }),
+                  icon: Icon(
+                    _follow ? Icons.play_circle_outline : Icons.play_circle,
+                  ),
+                ),
+              ],
+            ),
+            const Text(
+              'Relative trends - independent scales',
+              style: TextStyle(fontSize: 12),
+            ),
+            if (_error != null)
+              Text(_error!, maxLines: 2, overflow: TextOverflow.ellipsis),
+            Expanded(
+              child: RelativeOverlayPlot(
+                series: series,
+                colors: {
+                  for (final metric in series.keys) metric: _color(metric),
+                },
+                start: start,
+                end: end,
+                events: events,
+                cursor: _overlayCursor,
+                onInspect: (time) => setState(() {
+                  _overlayCursor = time;
+                  _follow = false;
+                  _left = start;
+                  _right = end;
+                }),
+              ),
+            ),
+            Text(
+              _overlayCursor == null
+                  ? '${start.toLocal().toString().substring(11, 19)} - ${end.toLocal().toString().substring(11, 19)}'
+                  : 'Inspecting ${_overlayCursor!.toLocal()} (nearest samples)',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11),
+            ),
+            ...summaries,
+            if (config.metrics.length > 3)
+              const Text(
+                'First 3 metrics shown; all available in detailed plots.',
+                style: TextStyle(fontSize: 11),
+              ),
+          ],
+        ),
+      );
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          // Normal portrait layout fits; small/landscape/large text keeps controls reachable.
+          final minimum =
+              340.0 + (MediaQuery.textScalerOf(context).scale(14) - 14) * 12;
+          return constraints.maxHeight >= minimum
+              ? panel(constraints.maxHeight)
+              : SingleChildScrollView(child: panel(minimum));
+        },
+      );
+    }
     final content = SafeArea(
       child: !_ready
           ? ListView(
@@ -507,7 +665,8 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
 }
 
 class ProcessingEditor extends StatefulWidget {
-  const ProcessingEditor({super.key, required this.config});
+  const ProcessingEditor({super.key, required this.config, this.presets});
+  final ProcessingPresets? presets;
   final ProcessingConfig config;
   @override
   State<ProcessingEditor> createState() => _ProcessingEditorState();
@@ -545,35 +704,155 @@ class _ProcessingEditorState extends State<ProcessingEditor> {
     super.dispose();
   }
 
+  ProcessingConfig _read() {
+    double d(int i) => double.parse(_fields[i].text.trim());
+    int n(int i) => int.parse(_fields[i].text.trim());
+    final config = ProcessingConfig(
+      mode: _mode,
+      minimum: d(0),
+      maximum: d(1),
+      deviation: d(2),
+      reference: n(3),
+      windowSeconds: n(4),
+      minimumSamples: n(5),
+      minimumPairs: n(6),
+      coverage: d(7),
+      metrics: _metrics.toList(),
+    );
+    config.validate();
+    return config;
+  }
+
   void _save() {
     try {
-      double d(int i) => double.parse(_fields[i].text.trim());
-      int n(int i) => int.parse(_fields[i].text.trim());
-      final config = ProcessingConfig(
-        mode: _mode,
-        minimum: d(0),
-        maximum: d(1),
-        deviation: d(2),
-        reference: n(3),
-        windowSeconds: n(4),
-        minimumSamples: n(5),
-        minimumPairs: n(6),
-        coverage: d(7),
-        metrics: _metrics.toList(),
-      );
-      config.validate();
-      Navigator.pop(context, config);
+      Navigator.pop(context, _read());
     } catch (e) {
       setState(() => _error = 'Invalid settings: $e');
     }
   }
+
+  late final _presets = widget.presets ?? ProcessingPresets();
+  String _presetName = 'Current / modified';
+  bool _busy = false;
+  Future<void> _operation(Future<void> Function() action) async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await action();
+    } catch (e) {
+      if (mounted) setState(() => _error = '$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _open(ProcessingPreset preset) {
+    final c = preset.config;
+    setState(() {
+      _mode = c.mode;
+      _metrics
+        ..clear()
+        ..addAll(c.metrics);
+      final values = [
+        c.minimum,
+        c.maximum,
+        c.deviation,
+        c.reference,
+        c.windowSeconds,
+        c.minimumSamples,
+        c.minimumPairs,
+        c.coverage,
+      ];
+      for (var i = 0; i < _fields.length; i++) {
+        _fields[i].text = values[i].toString();
+      }
+      _presetName = preset.name;
+    });
+  }
+
+  Future<String?> _text(
+    String title, {
+    String initial = '',
+    bool json = false,
+  }) async {
+    return Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            _PresetTextPage(title: title, initial: initial, json: json),
+      ),
+    );
+  }
+
+  Future<void> _choosePreset() => _operation(() async {
+    final defaultConfig = await loadDefaultProcessing();
+    final custom = await _presets.load();
+    if (!mounted) return;
+    final choices = [
+      ProcessingPreset('Default', defaultConfig),
+      ProcessingPreset(
+        'Unfiltered',
+        ProcessingConfig.fromJson({...defaultConfig.toJson(), 'mode': 'raw'}),
+      ),
+      ...custom,
+    ];
+    final choice = await showModalBottomSheet<ProcessingPreset>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            for (final preset in choices)
+              ListTile(
+                title: Text(preset.name),
+                onTap: () => Navigator.pop(context, preset),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (choice != null && mounted) _open(choice);
+  });
+  Future<void> _savePreset() => _operation(() async {
+    final config = _read();
+    final name = await _text('Save preset');
+    if (name == null) return;
+    final preset = ProcessingPreset(name.trim(), config);
+    await _presets.save(preset);
+    if (mounted) setState(() => _presetName = preset.name);
+  });
+  Future<void> _exportPreset() => _operation(() async {
+    final preset = ProcessingPreset(_presetName, _read());
+    await Clipboard.setData(ClipboardData(text: preset.encode()));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Preset JSON copied. Save as a .json file or paste on another device.',
+          ),
+        ),
+      );
+    }
+  });
+  Future<void> _importPreset() => _operation(() async {
+    final text = await _text('Import preset JSON', json: true);
+    if (text == null) return;
+    final preset = ProcessingPreset.decode(text);
+    if (mounted) _open(preset);
+  });
 
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
       title: const Text('Processing settings'),
       actions: [
-        TextButton(onPressed: _save, child: const Text('Apply & save')),
+        TextButton(
+          onPressed: _busy ? null : _save,
+          child: const Text('Apply & save'),
+        ),
       ],
     ),
     body: SafeArea(
@@ -584,6 +863,39 @@ class _ProcessingEditorState extends State<ProcessingEditor> {
           const Text(
             'Applies to the whole derived view and future defaults for Live and History. Raw recordings and v1 recorded flags stay unchanged.',
           ),
+          ExpansionTile(
+            title: const Text('Presets'),
+            subtitle: Text(_presetName),
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(8),
+                child: Text(
+                  'Default is the current working screened configuration, not a validated optimum. Opening/importing stages changes; Apply & save activates them.',
+                ),
+              ),
+              Wrap(
+                children: [
+                  TextButton(
+                    onPressed: _busy ? null : _choosePreset,
+                    child: const Text('Open preset'),
+                  ),
+                  TextButton(
+                    onPressed: _busy ? null : _savePreset,
+                    child: const Text('Save preset'),
+                  ),
+                  TextButton(
+                    onPressed: _busy ? null : _exportPreset,
+                    child: const Text('Copy JSON'),
+                  ),
+                  TextButton(
+                    onPressed: _busy ? null : _importPreset,
+                    child: const Text('Import JSON'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const ListTile(title: Text('Basic settings')),
           DropdownButton<AnalysisMode>(
             value: _mode,
             isExpanded: true,
@@ -598,18 +910,13 @@ class _ProcessingEditorState extends State<ProcessingEditor> {
                   }),
                 ),
             ],
-            onChanged: (v) => setState(() => _mode = v!),
+            onChanged: (v) => setState(() {
+              _mode = v!;
+              _presetName = 'Current / modified';
+            }),
           ),
-          for (var i = 0; i < _fields.length; i++)
-            TextField(
-              controller: _fields[i],
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
-              decoration: InputDecoration(labelText: _labels[i]),
-            ),
           const Text(
-            'Select metrics. HR is device-reported and unaffected by RR screening.',
+            'Select metrics (HR = BPM). Live overlays the first three selected; detailed plots show all. HR is device-reported.',
           ),
           Wrap(
             spacing: 8,
@@ -620,9 +927,78 @@ class _ProcessingEditorState extends State<ProcessingEditor> {
                   selected: _metrics.contains(metric),
                   onSelected: (selected) => setState(() {
                     selected ? _metrics.add(metric) : _metrics.remove(metric);
+                    _presetName = 'Current / modified';
                   }),
                 ),
             ],
+          ),
+          ExpansionTile(
+            title: const Text('Advanced settings'),
+            children: [
+              for (var i = 0; i < _fields.length; i++)
+                TextField(
+                  controller: _fields[i],
+                  onChanged: (_) =>
+                      setState(() => _presetName = 'Current / modified'),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: InputDecoration(labelText: _labels[i]),
+                ),
+
+              const Text(
+                'Gaps always break RR adjacency. Raw preserves acquired values; invalid values and undefined metrics remain unavailable. Usable percentage is sample acceptance, not time coverage.',
+              ),
+            ],
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _PresetTextPage extends StatefulWidget {
+  const _PresetTextPage({
+    required this.title,
+    required this.initial,
+    required this.json,
+  });
+  final String title, initial;
+  final bool json;
+  @override
+  State<_PresetTextPage> createState() => _PresetTextPageState();
+}
+
+class _PresetTextPageState extends State<_PresetTextPage> {
+  late final _text = TextEditingController(text: widget.initial);
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(
+      title: Text(widget.title),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, _text.text),
+          child: const Text('Done'),
+        ),
+      ],
+    ),
+    body: SafeArea(
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          TextField(
+            controller: _text,
+            autofocus: true,
+            maxLines: widget.json ? 18 : 1,
+            decoration: InputDecoration(
+              labelText: widget.json ? 'Portable preset JSON' : 'Preset name',
+            ),
           ),
         ],
       ),

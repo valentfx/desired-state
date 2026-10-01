@@ -223,3 +223,73 @@ class _HistoryPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _HistoryPainter oldDelegate) => true;
 }
+
+/// Each series retains native values; only its painted vertical coordinate is
+/// scaled. Missing values and continuity segments are passed to the same painter
+/// as the detailed plots. Inspection always uses unreduced source points.
+class RelativeOverlayPlot extends StatelessWidget {
+  const RelativeOverlayPlot({
+    super.key,
+    required this.series,
+    required this.colors,
+    required this.start,
+    required this.end,
+    required this.events,
+    required this.onInspect,
+    this.cursor,
+  });
+  final Map<String, List<HistoryPoint>> series;
+  final Map<String, Color> colors;
+  final DateTime start, end;
+  final List<DateTime> events;
+  final DateTime? cursor;
+  final ValueChanged<DateTime> onInspect;
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      void inspect(double x) {
+        final fraction = ((x - 8) / math.max(1, constraints.maxWidth - 16))
+            .clamp(0.0, 1.0);
+        onInspect(
+          start.add(
+            Duration(
+              microseconds: (end.difference(start).inMicroseconds * fraction)
+                  .round(),
+            ),
+          ),
+        );
+      }
+
+      return Semantics(
+        label: 'Relative trends. Independently scaled series. Tap or drag to inspect original values.',
+        child: GestureDetector(
+          onTapDown: (d) => inspect(d.localPosition.dx),
+          onHorizontalDragUpdate: (d) => inspect(d.localPosition.dx),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              for (final entry in series.entries)
+                CustomPaint(
+                  painter: _HistoryPainter(
+                    reduceHistoryPoints(
+                      entry.value
+                          .where(
+                            (p) =>
+                                !p.time.isBefore(start) && !p.time.isAfter(end),
+                          )
+                          .toList(),
+                    ),
+                    start,
+                    end,
+                    events,
+                    colors[entry.key]!,
+                    cursor,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+}

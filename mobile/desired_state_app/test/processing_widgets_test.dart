@@ -69,6 +69,10 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Range only').last);
       await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilterChip, 'RR'));
+      await tester.ensureVisible(find.text('Advanced settings'));
+      await tester.tap(find.text('Advanced settings'));
+      await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField).first, '400');
       tester.view.viewInsets = const FakeViewPadding(bottom: 300);
       await tester.pump();

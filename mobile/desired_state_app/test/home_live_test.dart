@@ -128,7 +128,7 @@ void main() {
       );
       final logger = controller.sessionLogger!;
       expect(find.byType(BottomSheet), findsNothing);
-      expect(find.text('Filters & metrics'), findsOneWidget);
+      expect(find.textContaining('Filters & metrics'), findsOneWidget);
       await tester.runAsync(() => tester.tap(find.byTooltip('Session notes')));
       await settleIo(
         tester,
@@ -163,13 +163,12 @@ void main() {
         () => File('${logger.directory.path}/manifest.json').readAsString(),
       ))!;
       expect(jsonDecode(manifest)['description'], '');
-      await tester.scrollUntilVisible(
-        find.text('Min 1000.00 | Max 1020.00 | Avg 1010.00'),
-        200,
-        scrollable: find.byType(Scrollable).first,
+      expect(
+        find.textContaining('BPM 60.0 bpm | min 60.0 avg 60.0 max 60.0'),
+        findsOneWidget,
       );
       expect(
-        find.text('Min 1000.00 | Max 1020.00 | Avg 1010.00'),
+        find.textContaining('RMSSD 10.0 ms | min 10.0 avg 10.0 max 10.0'),
         findsOneWidget,
       );
       await tester.tap(find.text('Users / History'));

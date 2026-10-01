@@ -10,7 +10,7 @@ Existing code includes single-H10 acquisition, explicit start/pause/resume/stop,
 
 Flutter owns mobile/Windows UI, local acquisition/storage and live processing. Python owns canonical analysis/modeling; Flask is an optional integration boundary. Pi is optional for additional sensors. Recording must be independent of navigation. Preserve raw signals and clock provenance; packet receipt time is not exact beat time.
 
-Current navigation (2026-10-01): Users & History opens first, with existing-user/session-device-ID/local-date filters and a persistent Live tab. Start records directly without a setup popup. Live embeds processing choices, visible-range min/max/average and direct session-note editing while recording. Stable profiles/default straps remain pending; see current state for validation and exact limits.
+Current navigation (2026-10-01): Users & History opens first, with existing-user/session-device-ID/local-date filters and a persistent Live tab. Start records directly without a setup popup. Live now uses one independently scaled relative-trend overlay, initial BPM/RMSSD (existing preferences retained), one-line current/min/average/max and direct toolbar session notes. Device discovery/reconnect is separate. Basic/Advanced/Preset settings stage changes until Apply; custom presets save/open locally and transfer through JSON copy/import. The working screened Default is a separate versioned asset, not a validated optimum. Phone review of this compact layout is the immediate next step. Stable profiles/default straps remain pending; see current state for validation and exact limits.
 
 ## Overall requirements (broader items remain planned unless listed as completed below)
 
