@@ -6,15 +6,17 @@ import 'package:desired_state_app/main.dart';
 import 'package:desired_state_app/polar_h10_service.dart';
 import 'package:desired_state_app/session_controller.dart';
 
+import 'navigation_test_helpers.dart' show openScreen;
+
 void main() {
   testWidgets(
     'Overview opens first and Live is reachable without a recording',
     (WidgetTester tester) async {
       await tester.pumpWidget(const DesiredStateApp());
 
-      expect(find.text('Overview'), findsNWidgets(2));
+      expect(find.text('Overview'), findsOneWidget);
       expect(find.text('Scan for devices'), findsNothing);
-      await tester.tap(find.text('Live'));
+      await openScreen(tester, 'Live');
       await tester.pump();
       expect(find.text('Desired State'), findsOneWidget);
       expect(find.text('Scan for devices'), findsNothing);

@@ -14,6 +14,7 @@ import 'rr_history.dart';
 import 'session_logger.dart';
 import 'quick_markers.dart';
 import 'processing.dart';
+import 'muse_athena_service.dart';
 
 enum RecordingState { stopped, recording, paused }
 
@@ -31,6 +32,7 @@ class SessionController extends ChangeNotifier {
   SessionController({
     PolarH10Service? service,
     O2RingService? ringService,
+    MuseAthenaService? museService,
     RecordingForegroundService? foregroundService,
     this.directoryProvider,
     this.staleAfter = const Duration(seconds: 10),
@@ -40,11 +42,13 @@ class SessionController extends ChangeNotifier {
     Duration tickInterval = const Duration(seconds: 1),
   }) : polar = service ?? PolarH10Service(),
        ring = ringService ?? O2RingService(),
+       museAthena = museService ?? MuseAthenaService(),
        quickMarkers = QuickMarkerStore(directoryProvider: directoryProvider),
        processing = ProcessingStore(directoryProvider: directoryProvider),
        _foreground = foregroundService ?? RecordingForegroundService() {
     assert(maxAttempts > 0 && staleAfter > Duration.zero);
     _ringReadingSubscription = ring.readings.listen(_onRingReading);
+    museAthena.addListener(_onMuseChanged);
     _ringPacketSubscription = ring.packets.listen((packet) {
       final logger = sessionLogger;
       if (_recording && logger != null && ringId != null) {
@@ -116,6 +120,7 @@ class SessionController extends ChangeNotifier {
   BigInt? _lastAccTimestamp;
   final PolarH10Service polar;
   final O2RingService ring;
+  final MuseAthenaService museAthena;
   late final StreamSubscription<O2RingReading> _ringReadingSubscription;
   late final StreamSubscription<RawBlePacket> _ringPacketSubscription;
   late final StreamSubscription<DeviceConnectionStatus> _ringStatusSubscription;
@@ -131,7 +136,7 @@ class SessionController extends ChangeNotifier {
   bool _ringConnectInFlight = false;
   bool _ringManualDisconnect = false;
   bool get ringConnected => ringStatus == DeviceConnectionStatus.connected;
-  bool get canStart => connected || ringDataFresh;
+  bool get canStart => !museAthena.streaming && (connected || ringDataFresh);
   Duration? get ringDataAge =>
       _lastRingData == null ? null : _now - _lastRingData!;
   bool get ringDataFresh =>
@@ -264,6 +269,8 @@ class SessionController extends ChangeNotifier {
   void _changed() {
     if (!_disposed) notifyListeners();
   }
+
+  void _onMuseChanged() => _changed();
 
   void _save(Future<void> operation) {
     unawaited(
@@ -735,6 +742,8 @@ class SessionController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     quickMarkers.dispose();
+    museAthena.removeListener(_onMuseChanged);
+    museAthena.dispose();
     _timer.cancel();
     _cancelRecovery();
     unawaited(_ringReadingSubscription.cancel());

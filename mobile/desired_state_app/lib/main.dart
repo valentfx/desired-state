@@ -54,92 +54,136 @@ class SessionHome extends StatefulWidget {
 }
 
 class _SessionHomeState extends State<SessionHome> {
-  int _tab = 0, _historyRevision = 0, _overviewRevision = 0;
-  void _select(int tab) {
-    Navigator.of(context).popUntil((route) => route.isFirst);
-    setState(() {
-      _tab = tab;
-      if (tab == 0) _overviewRevision++;
-      if (tab == 2) _historyRevision++;
-    });
+  final _navigator = GlobalKey<NavigatorState>();
+  final _shell = GlobalKey<ScaffoldState>();
+  final _collector = GlobalKey<_CollectorScreenState>();
+  final _view = ValueNotifier<(int, int)>((0, 0));
+
+  void _select(int index) {
+    _shell.currentState?.closeDrawer();
+    _navigator.currentState?.popUntil((route) => route.isFirst);
+    _view.value = (index, _view.value.$2 + 1);
+  }
+
+  void _open(Widget screen) {
+    _shell.currentState?.closeDrawer();
+    _navigator.currentState?.push(
+      MaterialPageRoute<void>(builder: (_) => screen),
+    );
+  }
+
+  @override
+  void dispose() {
+    _view.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) => AppNavigation(
     showLive: () => _select(1),
     showHistory: () => _select(2),
-    child: LayoutBuilder(
-      builder: (context, constraints) {
-        final wide = constraints.maxWidth >= 900;
-        final pages = IndexedStack(
-          index: _tab,
-          children: [
-            OverviewScreen(
-              controller: widget.controller,
-              revision: _overviewRevision,
-              onLive: () => _select(1),
-              onAnalyze: () => _select(2),
-            ),
-            CollectorScreen(controller: widget.controller),
-            HistoryScreen(
-              controller: widget.controller,
-              revision: _historyRevision,
-              onLive: () => _select(1),
-            ),
-          ],
-        );
-        return Scaffold(
-          body: Row(
+    child: Scaffold(
+      key: _shell,
+      appBar: AppBar(
+        toolbarHeight: 44,
+        title: ListenableBuilder(
+          listenable: widget.controller,
+          builder: (context, _) => Text(
+            widget.controller.sessionLogger == null
+                ? 'Screens'
+                : '${widget.controller.recordingState == RecordingState.paused ? 'Paused' : 'Recording'} · ${widget.controller.participant}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ),
+      drawer: Drawer(
+        child: SafeArea(
+          child: ListView(
             children: [
-              if (wide) ...[
-                SafeArea(
-                  child: NavigationRail(
-                    extended: constraints.maxWidth >= 1200,
-                    selectedIndex: _tab,
-                    onDestinationSelected: _select,
-                    destinations: const [
-                      NavigationRailDestination(
-                        icon: Icon(Icons.home_outlined),
-                        label: Text('Overview'),
-                      ),
-                      NavigationRailDestination(
-                        icon: Icon(Icons.monitor_heart_outlined),
-                        label: Text('Live'),
-                      ),
-                      NavigationRailDestination(
-                        icon: Icon(Icons.insights_outlined),
-                        label: Text('Analyze'),
-                      ),
-                    ],
-                  ),
+              const ListTile(
+                title: Text('Desired State'),
+                subtitle: Text('Screens and tools'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.home_outlined),
+                title: const Text('Overview'),
+                onTap: () => _select(0),
+              ),
+              ListTile(
+                leading: const Icon(Icons.person_outline),
+                title: const Text('Participants'),
+                subtitle: const Text(
+                  'Select the viewed participant in Overview',
                 ),
-                const VerticalDivider(width: 1),
-              ],
-              Expanded(key: const ValueKey('workspace-pages'), child: pages),
+                onTap: () => _select(0),
+              ),
+              ListTile(
+                leading: const Icon(Icons.monitor_heart_outlined),
+                title: const Text('Live'),
+                onTap: () => _select(1),
+              ),
+              ListTile(
+                leading: const Icon(Icons.insights_outlined),
+                title: const Text('Analyze'),
+                onTap: () => _select(2),
+              ),
+              const Divider(),
+              ListTile(
+                leading: const Icon(Icons.bluetooth),
+                title: const Text('Devices'),
+                onTap: () => _open(DeviceScreen(controller: widget.controller)),
+              ),
+              ListTile(
+                leading: const Icon(Icons.tune),
+                title: const Text('Processing & plots'),
+                onTap: () =>
+                    _open(ProcessingScreen(controller: widget.controller)),
+              ),
+              ListTile(
+                leading: const Icon(Icons.science_outlined),
+                title: const Text('Advanced tools'),
+                onTap: () {
+                  _shell.currentState?.closeDrawer();
+                  _select(1);
+                  _collector.currentState?._openAdvanced();
+                },
+              ),
             ],
           ),
-          bottomNavigationBar: wide
-              ? null
-              : NavigationBar(
-                  selectedIndex: _tab,
-                  onDestinationSelected: _select,
-                  destinations: const [
-                    NavigationDestination(
-                      icon: Icon(Icons.home_outlined),
-                      label: 'Overview',
-                    ),
-                    NavigationDestination(
-                      icon: Icon(Icons.monitor_heart_outlined),
-                      label: 'Live',
-                    ),
-                    NavigationDestination(
-                      icon: Icon(Icons.insights_outlined),
-                      label: 'Analyze',
-                    ),
-                  ],
-                ),
-        );
-      },
+        ),
+      ),
+      body: NavigatorPopHandler<Object?>(
+        onPopWithResult: (_) => _navigator.currentState?.maybePop(),
+        child: Navigator(
+          key: _navigator,
+          onGenerateRoute: (_) => MaterialPageRoute<void>(
+            builder: (_) => ValueListenableBuilder<(int, int)>(
+              valueListenable: _view,
+              builder: (context, selection, _) => IndexedStack(
+                index: selection.$1,
+                children: [
+                  OverviewScreen(
+                    controller: widget.controller,
+                    revision: selection.$2,
+                    onLive: () => _select(1),
+                    onAnalyze: () => _select(2),
+                  ),
+                  CollectorScreen(
+                    key: _collector,
+                    controller: widget.controller,
+                  ),
+                  HistoryScreen(
+                    controller: widget.controller,
+                    revision: selection.$2,
+                    onLive: () => _select(1),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     ),
   );
 }
@@ -462,6 +506,8 @@ class _CollectorScreenState extends State<CollectorScreen> {
       const SizedBox(height: 4),
       Text(_status),
       _streamStatus(),
+      if (_controller.polarId != null) _accLine(),
+      if (_controller.ringId != null) _ringLine(),
       QuickMarkerBar(controller: _controller),
       if (_lastSessionLogger != null)
         TextButton(
@@ -537,6 +583,8 @@ class _CollectorScreenState extends State<CollectorScreen> {
             embedded: true,
             header: [
               _streamStatus(),
+              if (_controller.polarId != null) _accLine(),
+              if (_controller.ringId != null) _ringLine(),
               Row(
                 children: [
                   Icon(

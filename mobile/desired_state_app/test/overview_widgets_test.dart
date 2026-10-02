@@ -12,6 +12,8 @@ import 'history_widgets_test.dart' show settleIo;
 import 'session_controller_test.dart' show FakePolar, FakeForeground;
 import 'session_history_test.dart' show historyFixture;
 
+import 'navigation_test_helpers.dart' show openScreen;
+
 void main() {
   test('personal scope excludes mixed, unassigned and malformed ownership', () {
     expect(
@@ -121,7 +123,7 @@ void main() {
     },
   );
 
-  testWidgets('wide navigation keeps Live state while resizing to mobile', (
+  testWidgets('screen menu keeps Live state while resizing to mobile', (
     tester,
   ) async {
     late Directory root;
@@ -151,14 +153,9 @@ void main() {
       tester,
       () => find.byType(CircularProgressIndicator).evaluate().isEmpty,
     );
-    expect(find.byType(NavigationRail), findsOneWidget);
+    expect(find.byType(NavigationRail), findsNothing);
     expect(find.byType(NavigationBar), findsNothing);
-    await tester.tap(
-      find.descendant(
-        of: find.byType(NavigationRail),
-        matching: find.text('Live'),
-      ),
-    );
+    await openScreen(tester, 'Live');
     await tester.pumpAndSettle();
     await tester.enterText(
       find.widgetWithText(TextField, 'Participant name'),
@@ -167,8 +164,21 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(390, 850));
     await tester.pumpAndSettle();
     expect(find.byType(NavigationRail), findsNothing);
-    expect(find.byType(NavigationBar), findsOneWidget);
+    expect(find.byType(NavigationBar), findsNothing);
     expect(find.text('Draft participant'), findsOneWidget);
+    await openScreen(tester, 'Devices');
+    await tester.pumpAndSettle();
+    expect(find.text('Devices'), findsOneWidget);
+    await openScreen(tester, 'Overview');
+    await settleIo(
+      tester,
+      () => find.byType(CircularProgressIndicator).evaluate().isEmpty,
+    );
+    expect(find.text('Overview'), findsOneWidget);
+    await openScreen(tester, 'Live');
+    await tester.pumpAndSettle();
+    expect(find.text('Draft participant'), findsOneWidget);
+    expect(controller.participant, 'unassigned');
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });

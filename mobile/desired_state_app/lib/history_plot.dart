@@ -237,6 +237,7 @@ class RelativeOverlayPlot extends StatelessWidget {
     required this.events,
     required this.onInspect,
     this.cursor,
+    this.onPan,
   });
   final Map<String, List<HistoryPoint>> series;
   final Map<String, Color> colors;
@@ -244,6 +245,7 @@ class RelativeOverlayPlot extends StatelessWidget {
   final List<DateTime> events;
   final DateTime? cursor;
   final ValueChanged<DateTime> onInspect;
+  final ValueChanged<double>? onPan;
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
@@ -261,10 +263,16 @@ class RelativeOverlayPlot extends StatelessWidget {
       }
 
       return Semantics(
-        label: 'Relative trends. Independently scaled series. Tap or drag to inspect original values.',
+        label: 'Relative trends. Independently scaled series. Tap for values; drag to browse time.',
         child: GestureDetector(
           onTapDown: (d) => inspect(d.localPosition.dx),
-          onHorizontalDragUpdate: (d) => inspect(d.localPosition.dx),
+          onHorizontalDragUpdate: (d) {
+            if (onPan != null) {
+              onPan!(d.delta.dx / math.max(1, constraints.maxWidth - 16));
+            } else {
+              inspect(d.localPosition.dx);
+            }
+          },
           child: Stack(
             fit: StackFit.expand,
             children: [

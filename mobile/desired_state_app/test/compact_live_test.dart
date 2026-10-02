@@ -1,3 +1,5 @@
+import 'package:desired_state_app/device_screen.dart';
+
 import 'dart:convert';
 import 'dart:io';
 
@@ -13,6 +15,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'history_widgets_test.dart' show settleIo;
 import 'session_controller_test.dart' show FakePolar, FakeForeground, rows;
+
+import 'navigation_test_helpers.dart' show openScreen;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -185,12 +189,7 @@ void main() {
         tester,
         () => find.byType(CircularProgressIndicator).evaluate().isEmpty,
       );
-      await tester.tap(
-        find.descendant(
-          of: find.byType(NavigationBar),
-          matching: find.text('Live'),
-        ),
-      );
+      await openScreen(tester, 'Live');
       await tester.pumpAndSettle();
       final logger = controller.sessionLogger!;
       expect(find.byType(RelativeOverlayPlot), findsOneWidget);
@@ -202,9 +201,11 @@ void main() {
       final verticalScrolls = find.byWidgetPredicate(
         (w) => w is Scrollable && w.axisDirection == AxisDirection.down,
       );
-      expect(verticalScrolls, findsNothing);
+      expect(verticalScrolls, findsWidgets);
+      await tester.ensureVisible(find.textContaining('RMSSD 10.0'));
       expect(find.byTooltip('Stop recording').hitTestable(), findsOneWidget);
       expect(find.textContaining('RMSSD 10.0').hitTestable(), findsOneWidget);
+      await tester.ensureVisible(find.byType(RelativeOverlayPlot));
       await tester.tap(find.byType(RelativeOverlayPlot));
       await tester.pump();
       final frozen = tester
@@ -221,6 +222,7 @@ void main() {
             .end,
         frozen,
       );
+      await tester.ensureVisible(find.byTooltip('Back to live'));
       await tester.tap(find.byTooltip('Back to live'));
       await tester.pump();
       expect(
@@ -233,7 +235,22 @@ void main() {
       await tester.tap(find.byTooltip('Device connection'));
       await tester.pumpAndSettle();
       expect(find.text('Scan for Polar H10'), findsNothing);
-      expect(find.text('Reconnect H10'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('Reconnect H10'),
+        180,
+        scrollable: find
+            .descendant(
+              of: find.byType(DeviceScreen),
+              matching: find.byWidgetPredicate(
+                (widget) =>
+                    widget is Scrollable &&
+                    widget.axisDirection == AxisDirection.down,
+              ),
+            )
+            .first,
+      );
+      await tester.pump();
+      expect(find.text('Reconnect H10').hitTestable(), findsOneWidget);
       await tester.runAsync(() => tester.tap(find.text('Reconnect H10')));
       await tester.pumpAndSettle();
       expect(controller.sessionLogger, same(logger));

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'processing_presets.dart';
+import 'plot_viewport.dart';
 
 import 'processing.dart';
 import 'session_controller.dart';
@@ -208,7 +209,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
     final latest = processor.results.isEmpty ? null : processor.results.last;
     if (widget.embedded && _ready) {
       final series = <String, List<HistoryPoint>>{
-        for (final metric in config.metrics.take(3))
+        for (final metric in config.metrics)
           metric: metric == 'HR'
               ? hr
               : [
@@ -256,6 +257,23 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
           ),
         );
       }
+      void navigate({double shift = 0, double zoom = 1}) {
+        final range = plotViewport(
+          first: first,
+          last: last,
+          start: start,
+          end: end,
+          shift: shift,
+          zoom: zoom,
+        );
+        setState(() {
+          _follow = false;
+          _left = range.$1;
+          _right = range.$2;
+          _overlayCursor = null;
+        });
+      }
+
       Widget panel(double height) => SizedBox(
         height: height,
         child: Column(
@@ -278,7 +296,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                 DropdownButton<int>(
                   value: _preset ?? 0,
                   items: [
-                    for (final seconds in [30, 60, 300, 0])
+                    for (final seconds in [30, 60, 300, 900, 3600, 0])
                       DropdownMenuItem(
                         value: seconds,
                         child: Text(seconds == 0 ? 'All' : '${seconds}s'),
@@ -302,8 +320,59 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                 ),
               ],
             ),
+            Row(
+              children: [
+                IconButton(
+                  tooltip: 'Earlier data',
+                  onPressed: () => navigate(shift: -0.8),
+                  icon: const Icon(Icons.chevron_left),
+                ),
+                IconButton(
+                  tooltip: 'Zoom in',
+                  onPressed: () => navigate(zoom: 0.5),
+                  icon: const Icon(Icons.zoom_in),
+                ),
+                IconButton(
+                  tooltip: 'Zoom out',
+                  onPressed: () => navigate(zoom: 2),
+                  icon: const Icon(Icons.zoom_out),
+                ),
+                IconButton(
+                  tooltip: 'Later data',
+                  onPressed: () => navigate(shift: 0.8),
+                  icon: const Icon(Icons.chevron_right),
+                ),
+              ],
+            ),
+            if (times.length > 1)
+              SizedBox(
+                height: 30,
+                child: RangeSlider(
+                  values: RangeValues(
+                    times
+                        .indexWhere((time) => !time.isBefore(start))
+                        .clamp(0, times.length - 1)
+                        .toDouble(),
+                    times
+                        .lastIndexWhere((time) => !time.isAfter(end))
+                        .clamp(0, times.length - 1)
+                        .toDouble(),
+                  ),
+                  min: 0,
+                  max: (times.length - 1).toDouble(),
+                  onChanged: (value) {
+                    if (value.end - value.start < 1) return;
+                    setState(() {
+                      _follow = false;
+                      _left = times[value.start.round()];
+                      _right = times[value.end.round()];
+                      _overlayCursor = null;
+                    });
+                  },
+                ),
+              ),
             const Text(
-              'Relative trends - independent scales',
+              'Relative trends · drag to browse, tap for values',
               style: TextStyle(fontSize: 12),
             ),
             if (_error != null)
@@ -318,6 +387,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                 end: end,
                 events: events,
                 cursor: _overlayCursor,
+                onPan: (fraction) => navigate(shift: -fraction),
                 onInspect: (time) => setState(() {
                   _overlayCursor = time;
                   _follow = false;
@@ -335,11 +405,6 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
               style: const TextStyle(fontSize: 11),
             ),
             ...summaries,
-            if (config.metrics.length > 3)
-              const Text(
-                'First 3 metrics shown; all available in detailed plots.',
-                style: TextStyle(fontSize: 11),
-              ),
           ],
         ),
       );
@@ -347,7 +412,9 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
         builder: (context, constraints) {
           // Normal portrait layout fits; small/landscape/large text keeps controls reachable.
           final minimum =
-              340.0 + (MediaQuery.textScalerOf(context).scale(14) - 14) * 12;
+              560.0 +
+              (summaries.length - 2).clamp(0, 99) * 24 +
+              (MediaQuery.textScalerOf(context).scale(14) - 14) * 12;
           return constraints.maxHeight >= minimum
               ? panel(constraints.maxHeight)
               : SingleChildScrollView(child: panel(minimum));
@@ -467,7 +534,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                 Wrap(
                   spacing: 6,
                   children: [
-                    for (final seconds in <int?>[30, 60, 300, null])
+                    for (final seconds in <int?>[30, 60, 300, 900, 3600, null])
                       ChoiceChip(
                         label: Text(seconds == null ? 'All' : '${seconds}s'),
                         selected: _follow && _preset == seconds,
@@ -916,7 +983,7 @@ class _ProcessingEditorState extends State<ProcessingEditor> {
             }),
           ),
           const Text(
-            'Select metrics (HR = BPM). Live overlays the first three selected; detailed plots show all. HR is device-reported.',
+            'Select metrics (HR = BPM). Live and detailed plots show all selected metrics. HR is device-reported.',
           ),
           Wrap(
             spacing: 8,

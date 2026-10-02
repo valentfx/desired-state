@@ -62,7 +62,9 @@ class _OverviewScreenState extends State<OverviewScreen> {
     return repository.list();
   }
 
-  void _refresh() => setState(() => _sessions = repository.list());
+  void _refresh() => setState(() {
+    _sessions = repository.list();
+  });
 
   @override
   void didUpdateWidget(covariant OverviewScreen oldWidget) {

@@ -14,6 +14,8 @@ import 'history_widgets_test.dart' show settleIo;
 import 'session_controller_test.dart' show FakePolar, FakeForeground, rows;
 import 'session_history_test.dart' show historyFixture;
 
+import 'navigation_test_helpers.dart' show openScreen;
+
 void main() {
   test(
     'metric summaries omit missing/nonfinite samples and retain real zeroes',
@@ -106,15 +108,15 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(home: SessionHome(controller: controller)),
       );
-      expect(find.text('Overview'), findsNWidgets(2));
-      await tester.tap(find.text('Analyze'));
+      expect(find.text('Overview'), findsOneWidget);
+      await openScreen(tester, 'Analyze');
       await settleIo(
         tester,
         () => find.textContaining('Original intention').evaluate().isNotEmpty,
       );
       expect(find.text('History'), findsOneWidget);
       expect(controller.sessionLogger, isNull);
-      await tester.tap(find.text('Live'));
+      await openScreen(tester, 'Live');
       await tester.pumpAndSettle();
       await tester.enterText(
         find.widgetWithText(TextField, 'Participant name'),
@@ -173,7 +175,7 @@ void main() {
         find.textContaining('RMSSD 10.0 ms | min 10.0 avg 10.0 max 10.0'),
         findsOneWidget,
       );
-      await tester.tap(find.text('Analyze'));
+      await openScreen(tester, 'Analyze');
       await settleIo(
         tester,
         () => find.textContaining('Edited intention').evaluate().isNotEmpty,

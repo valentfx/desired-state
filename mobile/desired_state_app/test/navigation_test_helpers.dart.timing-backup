@@ -1,0 +1,11 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+Future<void> openScreen(WidgetTester tester, String name) async {
+  await tester.tap(find.byTooltip('Open navigation menu'));
+  await tester.pump(const Duration(milliseconds: 350));
+  await tester.tap(
+    find.descendant(of: find.byType(Drawer), matching: find.text(name)),
+  );
+  await tester.pump(const Duration(milliseconds: 350));
+}
