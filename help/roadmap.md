@@ -50,3 +50,10 @@ Improve contrasting colors, bound plots where present, and keep forms keyboard/s
 - Modeling, baseline personalization, stimulus and optional additional sensors follow validated acquisition/analysis contracts. No adaptive model or LF/HF autonomic-balance interpretation is implemented.
 
 Update current state and the help log as work lands; retain raw/derived/inferred/decision distinctions. Follow [../AGENTS.md](../AGENTS.md) on both PCs.
+# O2Ring integration follow-up
+
+- [ ] Test physical O2Ring discovery and Diagnostics on Android. Confirm the visible `O2RING-PROTOCOL-DUAL-20261001` driver build, detected GATT protocol/write paths, exact notify subscription outcomes, TXs and representative raw RX hex while worn/still/moving.
+- [ ] The app now probes both known generations if both GATT services are exposed: legacy `14839ac4`/`AA 17 E8...` (two-second polling) and OxyII O2Ring-S `E8FB0001`/framed `cmd=0x04` (one-second polling). Identify which request receives valid replies on this exact model/firmware and disable the unneeded path; inspect measured cadence.
+- [ ] Confirm response framing, length and integrity/checksum against this physical device before enabling vendor SpO₂/pulse/PI/motion/battery/worn-state decoding. Vendor packets currently remain raw.
+- [ ] After decoding is verified, write O2Ring source rows with device provenance into the common session format and validate simultaneous H10 + O2Ring recording. Do not collapse H10 HR and O2Ring pulse.
+

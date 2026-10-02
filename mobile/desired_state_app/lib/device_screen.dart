@@ -3,6 +3,8 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'session_controller.dart';
+import 'o2_ring_service.dart';
+import 'o2_ring_diagnostics_screen.dart';
 
 /// Device discovery is navigation only; recording remains app-owned.
 class DeviceScreen extends StatefulWidget {
@@ -35,7 +37,7 @@ class _DeviceScreenState extends State<DeviceScreen> {
     setState(() {
       _scanning = true;
       _scanResults = [];
-      _scanStatus = 'Scanning for Polar H10...';
+      _scanStatus = 'Scanning for Polar H10 and O2Ring...';
     });
 
     try {
@@ -45,14 +47,14 @@ class _DeviceScreenState extends State<DeviceScreen> {
         setState(() => _scanStatus = 'Bluetooth permission denied');
         return;
       }
-      final results = await _controller.polar.scan();
+      final results = await _scanAll();
 
       if (!mounted) return;
 
       setState(() {
         _scanResults = results;
         _scanStatus = results.isEmpty
-            ? 'No Polar H10 found'
+            ? 'No supported device found'
             : 'Found ${results.length} device(s)';
       });
     } catch (e) {
@@ -70,8 +72,32 @@ class _DeviceScreenState extends State<DeviceScreen> {
     }
   }
 
+  Future<List<ScanResult>> _scanAll() async {
+    // The adapter scans are serialized because FlutterBlue owns one scanner.
+    // A broad O2Ring scan is run first; the existing H10 service then performs
+    // its service-filtered discovery without changing H10 connection behavior.
+    final adapter = O2RingService();
+    final ring = await adapter.scan();
+    await adapter.dispose();
+    final h10 = await _controller.polar.scan();
+    final seen = <String>{};
+    return [
+      ...ring,
+      ...h10,
+    ].where((result) => seen.add(result.device.remoteId.str)).toList();
+  }
+
   Future<void> _connect(ScanResult result) async {
     _scanStatus = null;
+    if (O2RingService.isCandidate(result)) {
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => O2RingDiagnosticsScreen(result: result),
+        ),
+      );
+      return;
+    }
     await _controller.connect(result.device);
   }
 
@@ -81,7 +107,7 @@ class _DeviceScreenState extends State<DeviceScreen> {
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: _controller,
     builder: (context, _) => Scaffold(
-      appBar: AppBar(title: const Text('Connect H10')),
+      appBar: AppBar(title: const Text('Devices')),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(20),
@@ -111,16 +137,22 @@ class _DeviceScreenState extends State<DeviceScreen> {
                     ? null
                     : _scan,
                 icon: const Icon(Icons.bluetooth_searching),
-                label: Text(_scanning ? 'Searching...' : 'Scan for Polar H10'),
+                label: Text(_scanning ? 'Searching...' : 'Scan for devices'),
               ),
               for (final result in _scanResults)
                 ListTile(
                   title: Text(
                     result.device.platformName.isEmpty
-                        ? 'Polar / BLE device'
+                        ? (O2RingService.isCandidate(result)
+                              ? 'Viatom / Wellue O2Ring candidate'
+                              : 'Polar H10')
                         : result.device.platformName,
                   ),
-                  subtitle: Text(result.device.remoteId.str),
+                  subtitle: Text(
+                    O2RingService.isCandidate(result)
+                        ? '${result.device.remoteId.str} · Open diagnostics'
+                        : result.device.remoteId.str,
+                  ),
                   onTap: _controller.connecting || _controller.busy
                       ? null
                       : () => _connect(result),

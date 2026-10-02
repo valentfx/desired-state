@@ -1,6 +1,15 @@
 # Desired State current state
 
-Last reconciled: 2026-10-01, compact Live, separate device controls and portable presets implemented. Recording/recovery ownership is unchanged.
+Last reconciled: 2026-10-01, O2Ring protocol-family diagnostics updated. Compact Live, separate device controls and portable presets remain implemented; recording/recovery ownership is unchanged.
+
+## O2Ring legacy and OxyII diagnostics paths - software changed, physical validation pending
+
+- Devices discovers H10 alongside conservatively identified Viatom/Wellue/O2Ring candidates and opens a dedicated O2Ring Diagnostics screen. The H10 controller, reconnect behavior and session pipeline are unchanged.
+- Diagnostics records discovered service/characteristic UUIDs and exposed GATT properties, per-characteristic notify subscription outcomes, connection/service-discovery state and latest TX/RX details. The bounded 250-entry packet history preserves direction, timestamp, characteristic path, byte count and hex.
+- Diagnostics recognizes both published protocol families by their GATT service. Legacy O2Ring uses service `14839ac4-...`, request `AA 17 E8 00 00 00 00 1B`, and a two-second poll matching the ecostech/viatom-ble client. O2Ring-S/T8520 OxyII uses service `E8FB0001-...` and framed `A5 04 FB 00 seq 00 00 CRC-8/ITU` live requests, polling once per second. A device exposing both subscribed protocol pairs is probed through both, tagged separately in TX/RX logs.
+- Each path requires its notify listener/subscription to succeed before its corresponding request is sent. Write-without-response is preferred when GATT says it is supported; if the write fails, the opposite ATT write mode is tried once, following the cross-platform Viatom client. Requests are serialized; polling and in-flight work are stopped/drained on disconnect/dispose. Diagnostics shows build ID `O2RING-PROTOCOL-DUAL-20261001`, discovered characteristics/properties, detected protocol/write paths, subscription outcomes and raw packets.
+- Vendor packets stay raw; no SpO2, pulse, PI, motion, battery, worn-state or stored-file decoding has been enabled from guessed offsets. No O2Ring vendor response has yet been verified on this user's physical ring. Only the separate Bluetooth SIG standard pulse-oximeter characteristic is decoded. The new request paths need physical verification; Flutter checks were not run in the workspace because Flutter/Dart are unavailable.
+- O2Ring remains a diagnostics acquisition path. Routing validated vendor readings into a simultaneous multi-device stored session remains a later data-pipeline step. Automated tests, when run on a Flutter-enabled machine, do not establish ring compatibility or response cadence.
 
 ## Compact Live and portable presets - implemented 2026-10-01
 

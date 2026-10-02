@@ -13,14 +13,15 @@ void main() {
     await tester.pumpWidget(const DesiredStateApp());
 
     expect(find.text('Users & History'), findsOneWidget);
-    expect(find.text('Scan for Polar H10'), findsNothing);
+    expect(find.text('Scan for devices'), findsNothing);
     await tester.tap(find.text('Live'));
     await tester.pump();
     expect(find.text('Desired State'), findsOneWidget);
-    expect(find.text('Scan for Polar H10'), findsNothing);
+    expect(find.text('Scan for devices'), findsNothing);
     await tester.tap(find.text('Connect H10'));
     await tester.pumpAndSettle();
-    expect(find.text('Scan for Polar H10'), findsOneWidget);
+    expect(find.text('Devices'), findsOneWidget);
+    expect(find.text('Scan for devices'), findsOneWidget);
     expect(find.text('START RECORDING'), findsNothing);
     await tester.pumpWidget(const SizedBox());
   });
