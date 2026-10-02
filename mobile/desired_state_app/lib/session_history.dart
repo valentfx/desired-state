@@ -96,7 +96,7 @@ class HistoryEntry {
       manifest['session_id']?.toString() ??
       directory.uri.pathSegments.where((s) => s.isNotEmpty).last;
   String get participant => (manifest['assignments'] is Map)
-      ? (manifest['assignments'] as Map).values.join(', ')
+      ? (manifest['assignments'] as Map).values.toSet().join(', ')
       : 'Unknown participant';
   String get device => (manifest['assignments'] is Map)
       ? (manifest['assignments'] as Map).keys.join(', ')

@@ -6,14 +6,24 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.os.PowerManager
 import android.os.IBinder
 import java.util.Locale
 
 class RecordingService : Service() {
+    private var recordingWakeLock: PowerManager.WakeLock? = null
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         createChannel()
+        // The existing 5-second notification updates renew a bounded CPU lock.
+        // A stopped/crashed update loop cannot leave an indefinite lock held.
+        val lock = recordingWakeLock ?: getSystemService(PowerManager::class.java)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "DesiredState:recording")
+            .apply { setReferenceCounted(false); recordingWakeLock = this }
+        if (lock.isHeld) lock.release()
+        lock.acquire(10 * 60 * 1000L)
         if (intent?.action == ACTION_START) {
             sessionId = intent.getStringExtra(SESSION_ID) ?: "active session"
         }
@@ -62,6 +72,8 @@ class RecordingService : Service() {
     }
 
     override fun onDestroy() {
+        recordingWakeLock?.let { if (it.isHeld) it.release() }
+        recordingWakeLock = null
         stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
     }
@@ -74,7 +86,7 @@ class RecordingService : Service() {
                 "Desired State recording",
                 NotificationManager.IMPORTANCE_LOW,
             ).apply {
-                description = "Keeps Polar H10 session recording active while the screen is off."
+                description = "Keeps device session recording active while the screen is off."
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             },
         )

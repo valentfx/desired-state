@@ -4,11 +4,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 import 'device_models.dart';
+import 'o2_ring_protocol.dart';
 
-/// Ring-specific Viatom/Wellue adapter. Vendor packets remain raw until their
-/// layout and integrity checks have been verified against physical captures.
+/// Ring-specific Viatom/Wellue adapter with CRC-validated legacy live frames.
+/// Unknown protocol layouts remain raw for diagnostics.
 class O2RingService {
-  static const diagnosticsBuildId = 'O2RING-PROTOCOL-DUAL-20261001';
+  static const diagnosticsBuildId = 'O2RING-RECORDING-20261001';
   static final Guid pulseOximeterService = Guid(
     '00001822-0000-1000-8000-00805f9b34fb',
   );
@@ -36,6 +37,10 @@ class O2RingService {
   ];
   static const Duration pollInterval = Duration(seconds: 1);
 
+  final ViatomFrameAssembler _legacyFrames = ViatomFrameAssembler();
+  DeviceConnectionStatus connectionStatus = DeviceConnectionStatus.disconnected;
+  int validLegacyFrames = 0;
+  int get rejectedLegacyFrames => _legacyFrames.rejectedFrames;
   BluetoothDevice? _device;
   final List<_O2RingRequestPath> _requestPaths = [];
   final List<StreamSubscription<List<int>>> _notifications = [];
@@ -126,6 +131,11 @@ class O2RingService {
     return found;
   }
 
+  void _setStatus(DeviceConnectionStatus value) {
+    connectionStatus = value;
+    if (!_disposed) _status.add(value);
+  }
+
   Future<void> connect(BluetoothDevice device) async {
     debugPrint('[O2Ring] Driver revision $diagnosticsBuildId');
     await disconnect();
@@ -141,7 +151,7 @@ class O2RingService {
     _lastTx = 'None';
     _lastRx = 'None';
     _emitDiagnosticsChanged();
-    _status.add(DeviceConnectionStatus.connecting);
+    _setStatus(DeviceConnectionStatus.connecting);
 
     try {
       await device.connect(
@@ -153,7 +163,8 @@ class O2RingService {
         if (!_isCurrent(generation)) return;
         if (state == BluetoothConnectionState.disconnected) {
           _stopPolling();
-          _status.add(DeviceConnectionStatus.disconnected);
+          _legacyFrames.reset();
+          _setStatus(DeviceConnectionStatus.disconnected);
         }
       });
 
@@ -225,7 +236,7 @@ class O2RingService {
                 .map((path) => '${path.protocol}: ${path.write.uuid}')
                 .join(' | ');
       _emitDiagnosticsChanged();
-      _status.add(DeviceConnectionStatus.connected);
+      _setStatus(DeviceConnectionStatus.connected);
 
       // These are read-only measurement requests. If a device exposes both
       // protocol generations, try both so its actual response identifies which
@@ -247,7 +258,7 @@ class O2RingService {
         debugPrint('[O2Ring] No request sent: $_lastTx');
       }
     } catch (_) {
-      if (_isCurrent(generation)) _status.add(DeviceConnectionStatus.error);
+      if (_isCurrent(generation)) _setStatus(DeviceConnectionStatus.error);
       await disconnect();
       rethrow;
     }
@@ -347,7 +358,7 @@ class O2RingService {
     final generation = _generation;
     Object? firstError;
     try {
-      for (final path in paths) {
+      for (final path in List<_O2RingRequestPath>.of(paths)) {
         if (!_isCurrent(generation)) break;
         final bytes = path.service == viatomService
             ? readSensorsCommand
@@ -446,6 +457,21 @@ class O2RingService {
       '[O2Ring] RX $characteristic length=${bytes.length} hex=${packet.hex}',
     );
     if (reading != null) _readings.add(reading);
+    if (uuid == viatomNotify) {
+      for (final frame in _legacyFrames.add(bytes, now)) {
+        final decoded = decodeLegacySensorFrame(frame, now);
+        if (decoded == null) continue;
+        validLegacyFrames++;
+        // Physical responses identify the working protocol. Stop probing OxyII.
+        _requestPaths.removeWhere((path) => path.service == oxyIiService);
+        _writeCharacteristicStatus = 'Viatom legacy (CRC-validated responses)';
+        debugPrint(
+          '[O2Ring] decoded SpO2=${decoded.spo2} pulse=${decoded.pulse} '
+          'battery=${decoded.battery} worn=${decoded.wornCode} CRC=valid',
+        );
+        _readings.add(decoded);
+      }
+    }
     _emitDiagnosticsChanged();
   }
 
@@ -459,6 +485,39 @@ class O2RingService {
     if (!_disposed && !_diagnosticsChanged.isClosed) {
       _diagnosticsChanged.add(null);
     }
+  }
+
+  /// Decodes only the exact 13-byte live payload verified in physical captures.
+  /// The reply uses success status 0, not an echoed READ_SENSORS command.
+  static O2RingReading? decodeLegacySensorFrame(
+    List<int> frame,
+    DateTime receivedAt,
+  ) {
+    if (frame.length != 21 ||
+        frame[0] != 0x55 ||
+        frame[1] != 0 ||
+        frame[2] != 0xff ||
+        frame[3] != 0 ||
+        frame[4] != 0 ||
+        frame[5] != 13 ||
+        frame[6] != 0 ||
+        viatomCrc8(frame.sublist(0, 20)) != frame[20]) {
+      return null;
+    }
+    final worn = frame[18];
+    final spo2 = frame[7];
+    final pulse = frame[8];
+    return O2RingReading(
+      receivedAt: receivedAt,
+      spo2: worn == 0 || spo2 == 0 || spo2 > 100 ? null : spo2,
+      pulse: worn == 0 || pulse == 0 || pulse == 255 ? null : pulse,
+      motion: frame[16].toDouble(),
+      battery: frame[14] <= 100 ? frame[14] : null,
+      perfusionIndexRaw: frame[17],
+      wornCode: worn,
+      rawFrame: List<int>.unmodifiable(frame),
+      decoderVersion: 'viatom-legacy-live-13-v1',
+    );
   }
 
   /// Vendor notifications stay raw until their protocol has been validated.
@@ -509,6 +568,7 @@ class O2RingService {
 
   Future<void> disconnect() async {
     _generation++;
+    _legacyFrames.reset();
     _stopPolling();
     for (final subscription in _notifications) {
       await subscription.cancel();
@@ -525,7 +585,7 @@ class O2RingService {
         await device.disconnect();
       } catch (_) {}
     }
-    if (!_disposed) _status.add(DeviceConnectionStatus.disconnected);
+    if (!_disposed) _setStatus(DeviceConnectionStatus.disconnected);
   }
 
   Future<void> dispose() async {

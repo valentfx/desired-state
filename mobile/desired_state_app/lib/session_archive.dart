@@ -11,6 +11,8 @@ Future<File> exportSessionDirectory(Directory directory) async {
     'events.jsonl',
     'measurements.jsonl',
     'rr.jsonl',
+    'o2ring_measurements.jsonl',
+    'o2ring_raw.jsonl',
     'marker_notes.jsonl',
     'history_edits.jsonl',
     'processing_views.jsonl',

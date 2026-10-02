@@ -93,7 +93,8 @@ class _DeviceScreenState extends State<DeviceScreen> {
       if (!mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
-          builder: (_) => O2RingDiagnosticsScreen(result: result),
+          builder: (_) =>
+              O2RingDiagnosticsScreen(controller: _controller, result: result),
         ),
       );
       return;
@@ -112,6 +113,20 @@ class _DeviceScreenState extends State<DeviceScreen> {
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
+            if (_controller.ringDevice != null) ...[
+              Text('${_controller.ringName} · ${_controller.ringStatus.name}'),
+              Text('O2Ring rows recorded: ${_controller.recordedRingReadings}'),
+              OutlinedButton.icon(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) =>
+                        O2RingDiagnosticsScreen(controller: _controller),
+                  ),
+                ),
+                icon: const Icon(Icons.sensors),
+                label: const Text('O2Ring diagnostics'),
+              ),
+            ],
             Text(_controller.deviceName),
             Text(_controller.error ?? _controller.connectionStatus),
             if (_scanStatus != null) Text(_scanStatus!),

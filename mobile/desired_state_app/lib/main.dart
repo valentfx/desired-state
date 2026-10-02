@@ -110,9 +110,11 @@ class _CollectorScreenState extends State<CollectorScreen> {
   late final SessionController _controller;
   bool _exporting = false;
   bool _showConnect = false;
-  bool get _connected => _controller.connected;
+  bool get _connected => _controller.canStart;
   String get _status => _controller.error ?? _controller.status;
-  String get _deviceName => _controller.deviceName;
+  String get _deviceName => _controller.connected || _controller.polarId != null
+      ? _controller.deviceName
+      : _controller.ringName;
 
   RecordingState get _recordingState => _controller.recordingState;
 
@@ -341,6 +343,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
       ),
       const SizedBox(height: 4),
       Text(_status),
+      if (_controller.ringId != null) _ringLine(),
       QuickMarkerBar(controller: _controller),
       if (_lastSessionLogger != null)
         TextButton(
@@ -374,6 +377,24 @@ class _CollectorScreenState extends State<CollectorScreen> {
     ],
   );
 
+  Widget _ringLine() {
+    final reading = _controller.ringDataFresh
+        ? _controller.latestRingReading
+        : null;
+    return Text(
+      'O2 ${reading?.spo2 ?? '--'}% · pulse ${reading?.pulse ?? '--'} bpm · '
+      'battery ${reading?.battery ?? '--'}% · ${_controller.ringStatus.name} · '
+      '${_controller.recordedRingReadings} rows · '
+      '${_controller.ringDataAge?.inSeconds.toString() ?? '--'}s ago',
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(
+        color: Colors.deepPurple,
+        fontWeight: FontWeight.w600,
+      ),
+    );
+  }
+
   Widget _buildDashboard(BuildContext context) => Padding(
     padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
     child: Column(
@@ -383,6 +404,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
             controller: _controller,
             embedded: true,
             header: [
+              if (_controller.ringId != null) _ringLine(),
               Row(
                 children: [
                   Icon(

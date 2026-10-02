@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 import 'polar_h10_service.dart';
+import 'o2_ring_service.dart';
+import 'device_models.dart';
 import 'recording_foreground_service.dart';
 import 'rr_history.dart';
 import 'session_logger.dart';
@@ -27,6 +29,7 @@ class TimelinePoint {
 class SessionController extends ChangeNotifier {
   SessionController({
     PolarH10Service? service,
+    O2RingService? ringService,
     RecordingForegroundService? foregroundService,
     this.directoryProvider,
     this.staleAfter = const Duration(seconds: 10),
@@ -35,10 +38,27 @@ class SessionController extends ChangeNotifier {
     this.elapsedClock,
     Duration tickInterval = const Duration(seconds: 1),
   }) : polar = service ?? PolarH10Service(),
+       ring = ringService ?? O2RingService(),
        quickMarkers = QuickMarkerStore(directoryProvider: directoryProvider),
        processing = ProcessingStore(directoryProvider: directoryProvider),
        _foreground = foregroundService ?? RecordingForegroundService() {
     assert(maxAttempts > 0 && staleAfter > Duration.zero);
+    _ringReadingSubscription = ring.readings.listen(_onRingReading);
+    _ringPacketSubscription = ring.packets.listen((packet) {
+      final logger = sessionLogger;
+      if (_recording && logger != null && ringId != null) {
+        _save(logger.logO2RingPacket(deviceId: ringId!, packet: packet));
+      }
+    });
+    _ringStatusSubscription = ring.statusStream.listen((status) {
+      ringStatus = status;
+      if (status == DeviceConnectionStatus.disconnected ||
+          status == DeviceConnectionStatus.error) {
+        latestRingReading = null;
+        _event('o2ring_disconnected', description: ringId);
+      }
+      _changed();
+    });
     _dataSubscription = polar.dataStream.listen(_onData);
     _connectionSubscription = polar.connectionStream.listen((connected) {
       if (!connected) _lostConnection();
@@ -47,6 +67,80 @@ class SessionController extends ChangeNotifier {
   }
 
   final PolarH10Service polar;
+  final O2RingService ring;
+  late final StreamSubscription<O2RingReading> _ringReadingSubscription;
+  late final StreamSubscription<RawBlePacket> _ringPacketSubscription;
+  late final StreamSubscription<DeviceConnectionStatus> _ringStatusSubscription;
+  DeviceConnectionStatus ringStatus = DeviceConnectionStatus.disconnected;
+  BluetoothDevice? _ringTarget;
+  BluetoothDevice? get ringDevice => _ringTarget;
+  String? ringId;
+  String ringName = 'O2Ring';
+  O2RingReading? latestRingReading;
+  int recordedRingReadings = 0;
+  Duration? _lastRingData;
+  Duration _lastRingAttempt = Duration.zero;
+  bool _ringConnectInFlight = false;
+  bool _ringManualDisconnect = false;
+  bool get ringConnected => ringStatus == DeviceConnectionStatus.connected;
+  bool get canStart => connected || ringDataFresh;
+  Duration? get ringDataAge =>
+      _lastRingData == null ? null : _now - _lastRingData!;
+  bool get ringDataFresh =>
+      ringConnected &&
+      ringDataAge != null &&
+      ringDataAge! < const Duration(seconds: 10);
+
+  void _onRingReading(O2RingReading reading) {
+    if (_disposed) return;
+    latestRingReading = reading;
+    _lastRingData = _now;
+    final logger = sessionLogger;
+    if (_recording && logger != null && ringId != null) {
+      recordedRingReadings++;
+      _save(
+        logger.logO2RingReading(
+          deviceId: ringId!,
+          deviceName: ringName,
+          reading: reading,
+        ),
+      );
+    }
+    _changed();
+  }
+
+  Future<void> connectRing(BluetoothDevice device) async {
+    if (_ringConnectInFlight || _disposed) return;
+    if (sessionLogger != null &&
+        ringId != null &&
+        device.remoteId.str != ringId) {
+      throw StateError('Stop the session before changing the assigned O2Ring.');
+    }
+    _ringTarget = device;
+    ringId = device.remoteId.str;
+    ringName = device.platformName.isEmpty ? 'O2Ring' : device.platformName;
+    _ringManualDisconnect = false;
+    _ringConnectInFlight = true;
+    latestRingReading = null;
+    _lastRingData = null;
+    _lastRingAttempt = _now;
+    _changed();
+    try {
+      await ring.connect(device);
+      _event('o2ring_connected', description: ringId);
+    } finally {
+      _ringConnectInFlight = false;
+      _changed();
+    }
+  }
+
+  Future<void> disconnectRing() async {
+    if (_ringConnectInFlight) return;
+    _ringManualDisconnect = true;
+    _event('o2ring_manual_disconnect', description: ringId);
+    await ring.disconnect();
+  }
+
   final QuickMarkerStore quickMarkers;
   final ProcessingStore processing;
   final List<RrInput> analysisInputs = [];
@@ -176,7 +270,7 @@ class SessionController extends ChangeNotifier {
     required String participantName,
     String description = '',
   }) async {
-    if (!connected || sessionLogger != null || busy || polarId == null) return;
+    if (!canStart || sessionLogger != null || busy) return;
     busy = true;
     _changed();
     SessionLogger? opened;
@@ -186,8 +280,21 @@ class SessionController extends ChangeNotifier {
           : participantName.trim();
       await processing.load();
       opened = await SessionLogger.start(
-        polarId: polarId!,
-        deviceName: deviceName,
+        polarId: connected && polarId != null
+            ? polarId!
+            : 'O2RING_${ringId!.replaceAll(RegExp(r'[^A-Za-z0-9]'), '')}',
+        deviceName: connected ? deviceName : ringName,
+        primaryDeviceKind: connected ? 'polar_h10' : 'wellue_o2ring',
+        additionalDevices: ringId == null
+            ? null
+            : {
+                ringId!: {
+                  'name': ringName,
+                  'kind': 'wellue_o2ring',
+                  'ble_id': ringId,
+                  'decoder_version': 'viatom-legacy-live-13-v1',
+                },
+              },
         participantName: participant,
         description: description,
         directoryProvider: directoryProvider,
@@ -214,6 +321,7 @@ class SessionController extends ChangeNotifier {
       sessionLogger = opened;
       _visibleSessionId = opened.sessionId;
       lastSessionLogger = null;
+      recordedRingReadings = 0;
       rrHistory.clear();
       analysisInputs.clear();
       timeline.clear();
@@ -228,7 +336,7 @@ class SessionController extends ChangeNotifier {
       status = 'Recording';
       _exhausted = false;
       _waitingSince = _now;
-      if (!connected) _beginRecovery('disconnected');
+      if (!connected && _target != null) _beginRecovery('disconnected');
     } catch (failure) {
       await opened?.close();
       await _stopForeground();
@@ -313,8 +421,21 @@ class SessionController extends ChangeNotifier {
   }
 
   void _tick() {
+    if (_recording &&
+        !_ringManualDisconnect &&
+        !_ringConnectInFlight &&
+        _ringTarget != null &&
+        _now - _lastRingAttempt >= const Duration(seconds: 15) &&
+        (!ringConnected ||
+            ringDataAge == null ||
+            (ringDataAge != null &&
+                ringDataAge! >= const Duration(seconds: 15)))) {
+      _event('o2ring_recovery_attempt', description: ringId);
+      _save(connectRing(_ringTarget!));
+    }
     final age = lastDataAge ?? (_now - _waitingSince);
     if (_recording &&
+        _target != null &&
         !recovering &&
         !_exhausted &&
         !_manualDisconnect &&
@@ -328,7 +449,7 @@ class SessionController extends ChangeNotifier {
       _save(
         _foreground.update(
           state:
-              '${recordingState == RecordingState.paused ? 'Paused' : 'Recording'} · $connectionStatus · data ${lastDataAge?.inSeconds.toString() ?? '--'}s ago',
+              '${recordingState == RecordingState.paused ? 'Paused' : 'Recording'} · $connectionStatus · data ${lastDataAge?.inSeconds.toString() ?? '--'}s ago${ringId == null ? '' : ' · O2 ${ringDataFresh ? latestRingReading?.spo2 ?? '--' : '--'}% · ring ${ringStatus.name}'}',
           heartRate: _gap ? null : heartRate,
           rmssd: _gap ? null : rmssd,
           artifactCount: rrHistory.artifactCount,
@@ -561,6 +682,10 @@ class SessionController extends ChangeNotifier {
     quickMarkers.dispose();
     _timer.cancel();
     _cancelRecovery();
+    unawaited(_ringReadingSubscription.cancel());
+    unawaited(_ringPacketSubscription.cancel());
+    unawaited(_ringStatusSubscription.cancel());
+    unawaited(ring.dispose());
     unawaited(_dataSubscription.cancel());
     unawaited(_connectionSubscription.cancel());
     unawaited(polar.dispose());

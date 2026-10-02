@@ -50,6 +50,11 @@ class O2RingReading {
     this.pulse,
     this.quality,
     this.motion,
+    this.battery,
+    this.perfusionIndexRaw,
+    this.wornCode,
+    this.rawFrame = const [],
+    this.decoderVersion = 'bluetooth-sig-2a5f-v1',
   });
 
   final DateTime receivedAt;
@@ -57,4 +62,13 @@ class O2RingReading {
   final int? pulse;
   final int? quality;
   final double? motion;
+  final int? battery;
+
+  /// Protocol byte, without an assumed percent scaling.
+  final int? perfusionIndexRaw;
+  final int? wornCode;
+  final List<int> rawFrame;
+  final String decoderVersion;
+  bool? get worn => wornCode == 0 ? false : (wornCode == 1 ? true : null);
+  bool get usable => worn != false && spo2 != null && pulse != null;
 }

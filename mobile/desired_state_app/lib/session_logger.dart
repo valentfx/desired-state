@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 
 import 'session_archive.dart';
+import 'device_models.dart';
 
 class SessionLogger {
   SessionLogger._(
@@ -32,6 +33,8 @@ class SessionLogger {
     String description = '',
     Future<Directory> Function()? directoryProvider,
     DateTime? startedAt,
+    Map<String, dynamic>? additionalDevices,
+    String primaryDeviceKind = 'polar_h10',
   }) async {
     final documents =
         await (directoryProvider ?? getApplicationDocumentsDirectory)();
@@ -56,11 +59,19 @@ class SessionLogger {
       'rr_processing': 'mobile-median9-25pct-300-2000-v1',
       'continuity_version': 1,
       'continuity_description': 'Never pair RR across continuity_segment changes; receipt UTC is not beat time.',
-      'assignments': {polarId.toUpperCase(): participantName},
+      'assignments': {
+        polarId.toUpperCase(): participantName,
+        for (final id in (additionalDevices ?? {}).keys) id: participantName,
+      },
+      'auxiliary_streams_version': 1,
+      'timestamp_provenance': 'host_receipt_utc',
       'devices': {
+        ...?additionalDevices,
         polarId.toUpperCase(): {
           'name': deviceName,
-          'polar_id': polarId.toUpperCase(),
+          'kind': primaryDeviceKind,
+          if (primaryDeviceKind == 'polar_h10')
+            'polar_id': polarId.toUpperCase(),
         },
       },
       'started_utc': timestamp.toIso8601String(),
@@ -110,6 +121,52 @@ class SessionLogger {
       }
     });
   }
+
+  Future<void> logO2RingReading({
+    required String deviceId,
+    required String deviceName,
+    required O2RingReading reading,
+  }) => _enqueue(
+    () => _appendJsonl('o2ring_measurements', {
+      'schema_version': 1,
+      'session_id': sessionId,
+      'user_id': participantName,
+      'device_id': deviceId,
+      'device_name': deviceName,
+      'sensor_kind': 'wellue_o2ring',
+      'received_utc': reading.receivedAt.toUtc().toIso8601String(),
+      'timestamp_provenance': 'host_receipt_utc_frame_complete',
+      'decoder_version': reading.decoderVersion,
+      'spo2_percent': reading.spo2,
+      'pulse_bpm': reading.pulse,
+      'battery_percent': reading.battery,
+      'motion_raw': reading.motion,
+      'perfusion_index_raw': reading.perfusionIndexRaw,
+      'worn_code': reading.wornCode,
+      'worn': reading.worn,
+      'usable': reading.usable,
+      'raw_frame': reading.rawFrame,
+      'crc_valid': reading.rawFrame.isEmpty ? null : true,
+    }),
+  );
+
+  Future<void> logO2RingPacket({
+    required String deviceId,
+    required RawBlePacket packet,
+  }) => _enqueue(
+    () => _appendJsonl('o2ring_raw', {
+      'schema_version': 1,
+      'session_id': sessionId,
+      'user_id': participantName,
+      'device_id': deviceId,
+      'received_utc': packet.receivedAt.toUtc().toIso8601String(),
+      'timestamp_provenance': 'host_receipt_utc',
+      'direction': packet.direction.name,
+      'characteristic': packet.characteristic,
+      'bytes': packet.bytes,
+      'hex': packet.hex,
+    }),
+  );
 
   Future<void> writeEvent(
     String event, {
@@ -202,7 +259,13 @@ class SessionLogger {
   }
 
   void _openStreams() {
-    for (final stream in ['events', 'measurements', 'rr']) {
+    for (final stream in [
+      'events',
+      'measurements',
+      'rr',
+      'o2ring_measurements',
+      'o2ring_raw',
+    ]) {
       _sinks[stream] = File(
         '${directory.path}${Platform.pathSeparator}$stream.jsonl',
       ).openWrite(mode: FileMode.append);

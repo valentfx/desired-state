@@ -5,11 +5,17 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 import 'device_models.dart';
 import 'o2_ring_service.dart';
+import 'session_controller.dart';
 
 /// Engineering view for O2Ring acquisition and raw protocol investigation.
 class O2RingDiagnosticsScreen extends StatefulWidget {
-  const O2RingDiagnosticsScreen({super.key, required this.result});
-  final ScanResult result;
+  const O2RingDiagnosticsScreen({
+    super.key,
+    required this.controller,
+    this.result,
+  });
+  final SessionController controller;
+  final ScanResult? result;
 
   @override
   State<O2RingDiagnosticsScreen> createState() =>
@@ -17,7 +23,9 @@ class O2RingDiagnosticsScreen extends StatefulWidget {
 }
 
 class _O2RingDiagnosticsScreenState extends State<O2RingDiagnosticsScreen> {
-  final O2RingService _service = O2RingService();
+  O2RingService get _service => widget.controller.ring;
+  BluetoothDevice get _device =>
+      widget.result?.device ?? widget.controller.ringDevice!;
   StreamSubscription<DeviceConnectionStatus>? _statusSubscription;
   StreamSubscription<RawBlePacket>? _packetSubscription;
   StreamSubscription<O2RingReading>? _readingSubscription;
@@ -30,8 +38,19 @@ class _O2RingDiagnosticsScreenState extends State<O2RingDiagnosticsScreen> {
   @override
   void initState() {
     super.initState();
+    _status = widget.controller.ringStatus;
+    _packets.addAll(_service.recentPackets);
+    final reading = widget.controller.latestRingReading;
+    if (reading != null) _readings.add(reading);
     _statusSubscription = _service.statusStream.listen((value) {
-      if (mounted) setState(() => _status = value);
+      if (mounted) {
+        setState(() {
+          _status = value;
+          if (value != DeviceConnectionStatus.connected) {
+            _readings.clear();
+          }
+        });
+      }
     });
     _diagnosticsSubscription = _service.diagnosticsChanged.listen((_) {
       if (mounted) setState(() {});
@@ -50,13 +69,16 @@ class _O2RingDiagnosticsScreenState extends State<O2RingDiagnosticsScreen> {
         if (_readings.length > 120) _readings.removeAt(0);
       });
     });
-    _connect();
+    if (!widget.controller.ringConnected ||
+        widget.controller.ringId != _device.remoteId.str) {
+      _connect();
+    }
   }
 
   Future<void> _connect() async {
     if (mounted) setState(() => _error = null);
     try {
-      await _service.connect(widget.result.device);
+      await widget.controller.connectRing(_device);
     } catch (error) {
       if (mounted) setState(() => _error = '$error');
     }
@@ -68,7 +90,7 @@ class _O2RingDiagnosticsScreenState extends State<O2RingDiagnosticsScreen> {
     _diagnosticsSubscription?.cancel();
     _packetSubscription?.cancel();
     _readingSubscription?.cancel();
-    _service.dispose();
+    // Acquisition is owned by SessionController and survives navigation.
     super.dispose();
   }
 
@@ -84,36 +106,50 @@ class _O2RingDiagnosticsScreenState extends State<O2RingDiagnosticsScreen> {
           padding: const EdgeInsets.all(16),
           children: [
             Text(
-              widget.result.device.platformName.isEmpty
+              _device.platformName.isEmpty
                   ? 'Viatom / Wellue candidate'
-                  : widget.result.device.platformName,
+                  : _device.platformName,
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const Text('Driver: ${O2RingService.diagnosticsBuildId}'),
-            SelectableText('BLE ID: ${widget.result.device.remoteId.str}'),
+            SelectableText('BLE ID: ${_device.remoteId.str}'),
             Text('Connection: ${_status.name}'),
             Text('Service discovery: ${_service.serviceDiscoveryStatus}'),
             Text('Notify subscription: ${_notifySummary(notifyStatuses)}'),
-            Text('Detected protocol/write paths: ${_service.writeCharacteristicStatus}'),
+            Text(
+              'Detected protocol/write paths: ${_service.writeCharacteristicStatus}',
+            ),
             Text('Last TX: ${_service.lastTx}'),
             Text('Last RX: ${_service.lastRx}'),
+            Text(
+              'Validated frames: ${_service.validLegacyFrames} · rejected: ${_service.rejectedLegacyFrames}',
+            ),
             if (_error != null) SelectableText('Connection error: $_error'),
             const SizedBox(height: 12),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
-                _value('SpO₂', latest?.spo2 == null ? '--' : '${latest!.spo2}%'),
-                _value('Pulse', latest?.pulse == null ? '--' : '${latest!.pulse} bpm'),
-                _value('PI', '--'),
+                _value(
+                  'SpO₂',
+                  latest?.spo2 == null ? '--' : '${latest!.spo2}%',
+                ),
+                _value(
+                  'Pulse',
+                  latest?.pulse == null ? '--' : '${latest!.pulse} bpm',
+                ),
+                _value('PI raw', latest?.perfusionIndexRaw?.toString() ?? '--'),
                 _value('Motion', latest?.motion?.toStringAsFixed(2) ?? '--'),
-                _value('Battery', '--'),
-                _value('Worn / signal', '--'),
+                _value(
+                  'Battery',
+                  latest?.battery == null ? '--' : '${latest!.battery}%',
+                ),
+                _value('Worn / signal', latest?.wornCode?.toString() ?? '--'),
               ],
             ),
             const SizedBox(height: 8),
             const Text(
-              'Vendor responses are captured as raw bytes. SpO₂, pulse, PI, motion, battery, and worn-state offsets are not decoded until the physical packet format and integrity checks are verified.',
+              'Legacy live frames require complete assembly, the captured header/length, and a valid CRC. PI and motion are protocol bytes; their physical scaling is unverified. Return to Live to start recording; this connection stays active.',
             ),
             const SizedBox(height: 12),
             Wrap(
@@ -141,15 +177,18 @@ class _O2RingDiagnosticsScreenState extends State<O2RingDiagnosticsScreen> {
                   label: const Text('Request reading'),
                 ),
                 TextButton(
-                  onPressed: _service.disconnect,
+                  onPressed: widget.controller.disconnectRing,
                   child: const Text('Disconnect'),
                 ),
               ],
             ),
             const Divider(height: 32),
-            Text('GATT characteristics (${gatt.length})',
-                style: Theme.of(context).textTheme.titleMedium),
-            if (gatt.isEmpty) const Text('No GATT characteristics discovered yet.'),
+            Text(
+              'GATT characteristics (${gatt.length})',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            if (gatt.isEmpty)
+              const Text('No GATT characteristics discovered yet.'),
             for (final characteristic in gatt)
               Card(
                 child: Padding(
@@ -161,7 +200,9 @@ class _O2RingDiagnosticsScreenState extends State<O2RingDiagnosticsScreen> {
                         '${characteristic.serviceUuid}\n${characteristic.characteristicUuid}',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
-                      Text('Properties: ${characteristic.properties.join(', ')}'),
+                      Text(
+                        'Properties: ${characteristic.properties.join(', ')}',
+                      ),
                       if (notifyStatuses.containsKey(
                         '${characteristic.serviceUuid}/${characteristic.characteristicUuid}',
                       ))
@@ -173,12 +214,16 @@ class _O2RingDiagnosticsScreenState extends State<O2RingDiagnosticsScreen> {
                 ),
               ),
             const Divider(height: 32),
-            Text('Raw TX/RX packets (${_packets.length}/250)',
-                style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              'Raw TX/RX packets (${_packets.length}/250)',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             if (_packets.isEmpty)
               const Padding(
                 padding: EdgeInsets.only(top: 8),
-                child: Text('No TX or RX packets yet. Keep the ring on and awake. Supported request(s) are sent after notification subscription; each detected protocol uses its own polling interval.'),
+                child: Text(
+                  'No TX or RX packets yet. Keep the ring on and awake. Supported request(s) are sent after notification subscription; each detected protocol uses its own polling interval.',
+                ),
               ),
             for (final packet in _packets.reversed)
               Card(
@@ -205,9 +250,12 @@ class _O2RingDiagnosticsScreenState extends State<O2RingDiagnosticsScreen> {
 
   String _notifySummary(Map<String, String> statuses) {
     if (statuses.isEmpty) return 'No notify/indicate characteristics found';
-    final ringStatus = statuses['${O2RingService.viatomService}/${O2RingService.viatomNotify}'];
-    return ringStatus ?? '${statuses.values.where((value) => value == 'Subscribed').length} subscribed / ${statuses.length} found';
+    final ringStatus =
+        statuses['${O2RingService.viatomService}/${O2RingService.viatomNotify}'];
+    return ringStatus ??
+        '${statuses.values.where((value) => value == 'Subscribed').length} subscribed / ${statuses.length} found';
   }
 
-  Widget _value(String label, String value) => Chip(label: Text('$label: $value'));
+  Widget _value(String label, String value) =>
+      Chip(label: Text('$label: $value'));
 }
