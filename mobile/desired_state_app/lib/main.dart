@@ -10,6 +10,7 @@ import 'processing_screen.dart';
 import 'session_history.dart';
 import 'app_navigation.dart';
 import 'device_screen.dart';
+import 'overview_screen.dart';
 
 void main() {
   runApp(const DesiredStateApp());
@@ -53,46 +54,92 @@ class SessionHome extends StatefulWidget {
 }
 
 class _SessionHomeState extends State<SessionHome> {
-  int _tab = 0, _historyRevision = 0;
+  int _tab = 0, _historyRevision = 0, _overviewRevision = 0;
   void _select(int tab) {
     Navigator.of(context).popUntil((route) => route.isFirst);
     setState(() {
       _tab = tab;
-      if (tab == 0) _historyRevision++;
+      if (tab == 0) _overviewRevision++;
+      if (tab == 2) _historyRevision++;
     });
   }
 
   @override
   Widget build(BuildContext context) => AppNavigation(
     showLive: () => _select(1),
-    showHistory: () => _select(0),
-    child: Scaffold(
-      body: IndexedStack(
-        index: _tab,
-        children: [
-          HistoryScreen(
-            controller: widget.controller,
-            home: true,
-            revision: _historyRevision,
-            onLive: () => _select(1),
+    showHistory: () => _select(2),
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final wide = constraints.maxWidth >= 900;
+        final pages = IndexedStack(
+          index: _tab,
+          children: [
+            OverviewScreen(
+              controller: widget.controller,
+              revision: _overviewRevision,
+              onLive: () => _select(1),
+              onAnalyze: () => _select(2),
+            ),
+            CollectorScreen(controller: widget.controller),
+            HistoryScreen(
+              controller: widget.controller,
+              revision: _historyRevision,
+              onLive: () => _select(1),
+            ),
+          ],
+        );
+        return Scaffold(
+          body: Row(
+            children: [
+              if (wide) ...[
+                SafeArea(
+                  child: NavigationRail(
+                    extended: constraints.maxWidth >= 1200,
+                    selectedIndex: _tab,
+                    onDestinationSelected: _select,
+                    destinations: const [
+                      NavigationRailDestination(
+                        icon: Icon(Icons.home_outlined),
+                        label: Text('Overview'),
+                      ),
+                      NavigationRailDestination(
+                        icon: Icon(Icons.monitor_heart_outlined),
+                        label: Text('Live'),
+                      ),
+                      NavigationRailDestination(
+                        icon: Icon(Icons.insights_outlined),
+                        label: Text('Analyze'),
+                      ),
+                    ],
+                  ),
+                ),
+                const VerticalDivider(width: 1),
+              ],
+              Expanded(key: const ValueKey('workspace-pages'), child: pages),
+            ],
           ),
-          CollectorScreen(controller: widget.controller),
-        ],
-      ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _tab,
-        onDestinationSelected: _select,
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.people_outline),
-            label: 'Users / History',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.monitor_heart_outlined),
-            label: 'Live',
-          ),
-        ],
-      ),
+          bottomNavigationBar: wide
+              ? null
+              : NavigationBar(
+                  selectedIndex: _tab,
+                  onDestinationSelected: _select,
+                  destinations: const [
+                    NavigationDestination(
+                      icon: Icon(Icons.home_outlined),
+                      label: 'Overview',
+                    ),
+                    NavigationDestination(
+                      icon: Icon(Icons.monitor_heart_outlined),
+                      label: 'Live',
+                    ),
+                    NavigationDestination(
+                      icon: Icon(Icons.insights_outlined),
+                      label: 'Analyze',
+                    ),
+                  ],
+                ),
+        );
+      },
     ),
   );
 }
@@ -141,6 +188,83 @@ class _CollectorScreenState extends State<CollectorScreen> {
   void _openDevice() => Navigator.of(context).push(
     MaterialPageRoute<void>(
       builder: (_) => DeviceScreen(controller: _controller),
+    ),
+  );
+
+  void _openAdvanced() => Navigator.push(
+    context,
+    MaterialPageRoute<void>(
+      builder: (_) => Scaffold(
+        appBar: AppBar(title: const Text('Advanced live tools')),
+        body: SafeArea(
+          child: ListenableBuilder(
+            listenable: _controller,
+            builder: (context, _) => ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                RecordingHistoryBanner(
+                  controller: _controller,
+                  onLive: AppNavigation.maybeOf(this.context)?.showLive,
+                ),
+                if (_controller.polarId != null) _accLine(),
+                if (_controller.ringId != null) _ringLine(),
+                const SizedBox(height: 16),
+                ListTile(
+                  leading: const Icon(Icons.history),
+                  title: const Text('History'),
+                  subtitle: const Text(
+                    'All participants, notes and session exports',
+                  ),
+                  onTap: _openHistory,
+                ),
+                ListTile(
+                  leading: const Icon(Icons.bluetooth),
+                  title: const Text('Device diagnostics'),
+                  subtitle: const Text(
+                    'Connections, stream status and raw packets',
+                  ),
+                  onTap: _openDevice,
+                ),
+                ListTile(
+                  leading: const Icon(Icons.tune),
+                  title: const Text('Processing & plots'),
+                  subtitle: const Text(
+                    'Raw / filtered comparison, metrics and detailed plots',
+                  ),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => ProcessingScreen(controller: _controller),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  Widget _streamStatus() => InkWell(
+    onTap: _openAdvanced,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (_controller.polarId != null)
+          Text(
+            'H10 · ${_controller.connectionStatus} · HR packet ${_controller.lastDataAge?.inSeconds.toString() ?? '--'}s ago · ACC ${_controller.latestAcceleration != null && DateTime.now().difference(_controller.latestAcceleration!.receivedAt) < const Duration(seconds: 5) && _controller.connected ? 'fresh' : 'no fresh data'}',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        if (_controller.ringId != null)
+          Text(
+            'O2Ring · ${_controller.ringStatus.name} · SpO₂ ${_controller.ringDataFresh ? _controller.latestRingReading?.spo2 ?? '--' : '--'}% · ${_controller.ringDataFresh ? 'fresh' : 'no fresh data'}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Colors.deepPurple),
+          ),
+      ],
     ),
   );
   @override
@@ -215,40 +339,34 @@ class _CollectorScreenState extends State<CollectorScreen> {
 
   Future<void> _showEventNote() async {
     _eventDescriptionController.clear();
-    await showModalBottomSheet<void>(
+    await showDialog<void>(
       context: context,
-      isScrollControlled: true,
-      builder: (context) => Padding(
-        padding: EdgeInsets.fromLTRB(
-          20,
-          20,
-          20,
-          20 + MediaQuery.viewInsetsOf(context).bottom,
+      builder: (context) => AlertDialog(
+        alignment: Alignment.topCenter,
+        title: const Text('Mark event'),
+        scrollable: true,
+        content: TextField(
+          controller: _eventDescriptionController,
+          autofocus: true,
+          maxLines: 3,
+          decoration: const InputDecoration(
+            labelText: 'Note',
+            hintText: 'Optional event description',
+          ),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Mark event', style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _eventDescriptionController,
-              autofocus: true,
-              maxLines: 3,
-              decoration: const InputDecoration(
-                labelText: 'Note',
-                hintText: 'Optional event description',
-              ),
-            ),
-            const SizedBox(height: 16),
-            FilledButton(
-              onPressed: () async {
-                Navigator.pop(context);
-                await _markEvent();
-              },
-              child: const Text('SAVE EVENT'),
-            ),
-          ],
-        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await _markEvent();
+            },
+            child: const Text('SAVE EVENT'),
+          ),
+        ],
       ),
     );
   }
@@ -306,10 +424,10 @@ class _CollectorScreenState extends State<CollectorScreen> {
               ),
             ),
           ),
-          TextButton.icon(
-            onPressed: _openHistory,
-            icon: const Icon(Icons.history),
-            label: const Text('History'),
+          IconButton(
+            tooltip: 'Advanced tools',
+            onPressed: _openAdvanced,
+            icon: const Icon(Icons.more_vert),
           ),
         ],
       ),
@@ -343,7 +461,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
       ),
       const SizedBox(height: 4),
       Text(_status),
-      if (_controller.ringId != null) _ringLine(),
+      _streamStatus(),
       QuickMarkerBar(controller: _controller),
       if (_lastSessionLogger != null)
         TextButton(
@@ -377,6 +495,20 @@ class _CollectorScreenState extends State<CollectorScreen> {
     ],
   );
 
+  Widget _accLine() {
+    final frame = _controller.latestAcceleration;
+    final fresh =
+        _controller.connected &&
+        frame != null &&
+        DateTime.now().difference(frame.receivedAt) <
+            const Duration(seconds: 5);
+    final xyz = fresh ? frame.samples.last.join(', ') : '--';
+    return Text(
+      'H10 ACC: ${_controller.accelerationStatus} · XYZ $xyz mG · '
+      '${_controller.recordedAccSamples} samples recorded',
+    );
+  }
+
   Widget _ringLine() {
     final reading = _controller.ringDataFresh
         ? _controller.latestRingReading
@@ -404,7 +536,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
             controller: _controller,
             embedded: true,
             header: [
-              if (_controller.ringId != null) _ringLine(),
+              _streamStatus(),
               Row(
                 children: [
                   Icon(
@@ -523,7 +655,11 @@ class _CollectorScreenState extends State<CollectorScreen> {
       const Icon(Icons.monitor_heart),
       const SizedBox(width: 8),
       Expanded(child: Text(_deviceName)),
-      const Icon(Icons.check_circle, color: Colors.green),
+      Icon(
+        _controller.lastDataAge != null || _controller.ringDataFresh
+            ? Icons.sensors
+            : Icons.bluetooth_connected,
+      ),
     ],
   );
 

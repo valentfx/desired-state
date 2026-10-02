@@ -7,24 +7,25 @@ import 'package:desired_state_app/polar_h10_service.dart';
 import 'package:desired_state_app/session_controller.dart';
 
 void main() {
-  testWidgets('History opens first and Live is reachable without a recording', (
-    WidgetTester tester,
-  ) async {
-    await tester.pumpWidget(const DesiredStateApp());
+  testWidgets(
+    'Overview opens first and Live is reachable without a recording',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(const DesiredStateApp());
 
-    expect(find.text('Users & History'), findsOneWidget);
-    expect(find.text('Scan for devices'), findsNothing);
-    await tester.tap(find.text('Live'));
-    await tester.pump();
-    expect(find.text('Desired State'), findsOneWidget);
-    expect(find.text('Scan for devices'), findsNothing);
-    await tester.tap(find.text('Connect H10'));
-    await tester.pumpAndSettle();
-    expect(find.text('Devices'), findsOneWidget);
-    expect(find.text('Scan for devices'), findsOneWidget);
-    expect(find.text('START RECORDING'), findsNothing);
-    await tester.pumpWidget(const SizedBox());
-  });
+      expect(find.text('Overview'), findsNWidgets(2));
+      expect(find.text('Scan for devices'), findsNothing);
+      await tester.tap(find.text('Live'));
+      await tester.pump();
+      expect(find.text('Desired State'), findsOneWidget);
+      expect(find.text('Scan for devices'), findsNothing);
+      await tester.tap(find.text('Connect H10'));
+      await tester.pumpAndSettle();
+      expect(find.text('Devices'), findsOneWidget);
+      expect(find.text('Scan for devices'), findsOneWidget);
+      expect(find.text('START RECORDING'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
 
   testWidgets(
     'collector keeps live data out of a session until recording starts',

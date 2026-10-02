@@ -492,16 +492,14 @@ class SessionHistoryRepository {
     } catch (_) {
       warnings.add('Cannot read accelerometer recording');
     }
-    if (bad > 0) {
+    if (bad > 0)
       warnings.add('$bad accelerometer rows omitted: malformed/time/identity');
-    }
     return (samples, packets);
   }
 
   bool _belongs(JsonRow row, HistoryEntry entry) {
-    if (row['session_id'] != null && row['session_id'] != entry.id) {
+    if (row['session_id'] != null && row['session_id'] != entry.id)
       return false;
-    }
     final assignments = entry.manifest['assignments'];
     if (assignments is! Map) return false;
     final device = row['polar_id'] ?? row['device_id'];

@@ -77,7 +77,7 @@ void main() {
   });
 
   testWidgets(
-    'History first, direct Start, editable Live notes and navigation retain recording',
+    'Overview first, direct Start, editable Live notes and navigation retain recording',
     (tester) async {
       late Directory root;
       late SessionController controller;
@@ -106,11 +106,13 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(home: SessionHome(controller: controller)),
       );
+      expect(find.text('Overview'), findsNWidgets(2));
+      await tester.tap(find.text('Analyze'));
       await settleIo(
         tester,
         () => find.textContaining('Original intention').evaluate().isNotEmpty,
       );
-      expect(find.text('Users & History'), findsOneWidget);
+      expect(find.text('History'), findsOneWidget);
       expect(controller.sessionLogger, isNull);
       await tester.tap(find.text('Live'));
       await tester.pumpAndSettle();
@@ -171,7 +173,7 @@ void main() {
         find.textContaining('RMSSD 10.0 ms | min 10.0 avg 10.0 max 10.0'),
         findsOneWidget,
       );
-      await tester.tap(find.text('Users / History'));
+      await tester.tap(find.text('Analyze'));
       await settleIo(
         tester,
         () => find.textContaining('Edited intention').evaluate().isNotEmpty,

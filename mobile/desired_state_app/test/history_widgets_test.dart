@@ -241,6 +241,8 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(home: CollectorScreen(controller: controller)),
       );
+      await tester.tap(find.byTooltip('Advanced tools'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('History'));
       await settleIo(
         tester,

@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 import 'polar_h10_service.dart';
+import 'h10_accelerometer.dart';
 import 'o2_ring_service.dart';
 import 'device_models.dart';
 import 'recording_foreground_service.dart';
@@ -59,6 +60,45 @@ class SessionController extends ChangeNotifier {
       }
       _changed();
     });
+    _accSubscription = polar.accelerationStream.listen((frame) {
+      if (_disposed) return;
+      latestAcceleration = frame;
+      final previous = _lastAccTimestamp;
+      if (previous != null &&
+          (frame.sensorNanoseconds <= previous ||
+              frame.sensorNanoseconds - previous > BigInt.from(2000000000))) {
+        _accSegment++;
+        _event('accelerometer_clock_gap_or_reset');
+      }
+      _lastAccTimestamp = frame.sensorNanoseconds;
+      final logger = sessionLogger;
+      if (_recording && logger != null && polarId != null) {
+        recordedAccSamples += frame.samples.length;
+        _save(
+          logger.logAcceleration(
+            deviceId: polarId!,
+            frame: frame,
+            segment: _accSegment,
+          ),
+        );
+      }
+      _changed();
+    });
+    _pmdSubscription = polar.pmdPackets.listen((packet) {
+      final logger = sessionLogger;
+      if (_recording && logger != null && polarId != null) {
+        _save(logger.logPmdPacket(deviceId: polarId!, packet: packet));
+      }
+    });
+    _accStatusSubscription = polar.accelerationStatusStream.listen((status) {
+      accelerationStatus = status;
+      if (status == 'Disconnected' || status == 'Not connected') {
+        latestAcceleration = null;
+        _lastAccTimestamp = null;
+        _accSegment++;
+      }
+      _changed();
+    });
     _dataSubscription = polar.dataStream.listen(_onData);
     _connectionSubscription = polar.connectionStream.listen((connected) {
       if (!connected) _lostConnection();
@@ -66,6 +106,14 @@ class SessionController extends ChangeNotifier {
     _timer = Timer.periodic(tickInterval, (_) => _tick());
   }
 
+  late final StreamSubscription<H10Acceleration> _accSubscription;
+  late final StreamSubscription<RawBlePacket> _pmdSubscription;
+  late final StreamSubscription<String> _accStatusSubscription;
+  H10Acceleration? latestAcceleration;
+  String accelerationStatus = 'Not connected';
+  int recordedAccSamples = 0;
+  int _accSegment = 0;
+  BigInt? _lastAccTimestamp;
   final PolarH10Service polar;
   final O2RingService ring;
   late final StreamSubscription<O2RingReading> _ringReadingSubscription;
@@ -318,6 +366,12 @@ class SessionController extends ChangeNotifier {
         await _stopForeground();
         return;
       }
+      recordedAccSamples = 0;
+      _accSegment++;
+      await opened.writeEvent(
+        'accelerometer_configuration_initial',
+        description: accelerationStatus,
+      );
       sessionLogger = opened;
       _visibleSessionId = opened.sessionId;
       lastSessionLogger = null;
@@ -348,6 +402,7 @@ class SessionController extends ChangeNotifier {
   }
 
   void _break(String reason) {
+    _accSegment++;
     if (_gap) return;
     _gap = true;
     _segment++;
@@ -686,6 +741,9 @@ class SessionController extends ChangeNotifier {
     unawaited(_ringPacketSubscription.cancel());
     unawaited(_ringStatusSubscription.cancel());
     unawaited(ring.dispose());
+    unawaited(_accSubscription.cancel());
+    unawaited(_pmdSubscription.cancel());
+    unawaited(_accStatusSubscription.cancel());
     unawaited(_dataSubscription.cancel());
     unawaited(_connectionSubscription.cancel());
     unawaited(polar.dispose());

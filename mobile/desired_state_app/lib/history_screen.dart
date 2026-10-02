@@ -33,6 +33,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
       );
   late Future<List<HistoryEntry>> _sessions = repository.list();
   String _query = '';
+  final _search = TextEditingController();
   String? _user;
   final _identifier = TextEditingController();
   DateTimeRange? _dates;
@@ -45,6 +46,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   @override
   void dispose() {
     _identifier.dispose();
+    _search.dispose();
     super.dispose();
   }
 
@@ -67,6 +69,33 @@ class _HistoryScreenState extends State<HistoryScreen> {
       title: Text(widget.home ? 'Users & History' : 'History'),
       actions: [
         IconButton(
+          tooltip: 'Session storage diagnostics',
+          icon: const Icon(Icons.folder_open),
+          onPressed: () async {
+            String report;
+            try {
+              report = await repository.storageDiagnostics();
+            } catch (error) {
+              report = 'Storage inspection failed: $error';
+            }
+            if (!context.mounted) return;
+            await showDialog<void>(
+              context: context,
+              builder: (context) => AlertDialog(
+                alignment: Alignment.topCenter,
+                title: const Text('Session storage'),
+                content: SelectableText(report),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Close'),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+        IconButton(
           tooltip: 'Refresh sessions',
           onPressed: _refresh,
           icon: const Icon(Icons.refresh),
@@ -83,6 +112,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
           Padding(
             padding: const EdgeInsets.all(12),
             child: TextField(
+              controller: _search,
               decoration: const InputDecoration(
                 labelText: 'Find a session',
                 hintText: 'Participant, device, description, event or tag',
@@ -186,6 +216,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                         _user = null;
                                         _dates = null;
                                         _identifier.clear();
+                                        _search.clear();
+                                        _query = '';
                                       }),
                                       child: const Text('Clear filters'),
                                     ),
@@ -432,6 +464,10 @@ class _HistoryDetailScreenState extends State<HistoryDetailScreen> {
                       '${entry.started?.toLocal() ?? 'Unknown start'} · ${entry.device}',
                     ),
                     SelectableText(entry.id),
+                    Text(
+                      'O2Ring: ${session.oxygen.length} readings · '
+                      'H10 ACC: ${session.accelerationSamples} samples',
+                    ),
                     Text(
                       active
                           ? 'Active recording: saved-data snapshot; refresh for more. Stop before editing/export.'

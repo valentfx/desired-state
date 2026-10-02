@@ -13,6 +13,8 @@ Future<File> exportSessionDirectory(Directory directory) async {
     'rr.jsonl',
     'o2ring_measurements.jsonl',
     'o2ring_raw.jsonl',
+    'h10_accelerometer.jsonl',
+    'h10_pmd_raw.jsonl',
     'marker_notes.jsonl',
     'history_edits.jsonl',
     'processing_views.jsonl',

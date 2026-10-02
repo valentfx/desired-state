@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'session_archive.dart';
 import 'device_models.dart';
+import 'h10_accelerometer.dart';
 
 class SessionLogger {
   SessionLogger._(
@@ -64,6 +65,8 @@ class SessionLogger {
         for (final id in (additionalDevices ?? {}).keys) id: participantName,
       },
       'auxiliary_streams_version': 1,
+      'h10_accelerometer_stream_version': 1,
+      'h10_accelerometer_units': 'milli_g',
       'timestamp_provenance': 'host_receipt_utc',
       'devices': {
         ...?additionalDevices,
@@ -121,6 +124,37 @@ class SessionLogger {
       }
     });
   }
+
+  Future<void> logAcceleration({
+    required String deviceId,
+    required H10Acceleration frame,
+    required int segment,
+  }) => _enqueue(
+    () => _appendJsonl('h10_accelerometer', {
+      ...frame.toJson(),
+      'session_id': sessionId,
+      'polar_id': deviceId,
+      'user_id': participantName,
+      'continuity_segment': segment,
+    }),
+  );
+
+  Future<void> logPmdPacket({
+    required String deviceId,
+    required RawBlePacket packet,
+  }) => _enqueue(
+    () => _appendJsonl('h10_pmd_raw', {
+      'schema_version': 1,
+      'session_id': sessionId,
+      'polar_id': deviceId,
+      'user_id': participantName,
+      'received_utc': packet.receivedAt.toUtc().toIso8601String(),
+      'direction': packet.direction.name,
+      'characteristic': packet.characteristic,
+      'bytes': packet.bytes,
+      'hex': packet.hex,
+    }),
+  );
 
   Future<void> logO2RingReading({
     required String deviceId,
@@ -265,6 +299,8 @@ class SessionLogger {
       'rr',
       'o2ring_measurements',
       'o2ring_raw',
+      'h10_accelerometer',
+      'h10_pmd_raw',
     ]) {
       _sinks[stream] = File(
         '${directory.path}${Platform.pathSeparator}$stream.jsonl',

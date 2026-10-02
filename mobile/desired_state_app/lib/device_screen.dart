@@ -129,6 +129,8 @@ class _DeviceScreenState extends State<DeviceScreen> {
             ],
             Text(_controller.deviceName),
             Text(_controller.error ?? _controller.connectionStatus),
+            if (_controller.polarId != null)
+              Text('H10 ACC: ${_controller.accelerationStatus}'),
             if (_scanStatus != null) Text(_scanStatus!),
             if (_controller.sessionLogger != null)
               const Text(
