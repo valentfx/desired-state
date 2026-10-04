@@ -257,7 +257,12 @@ class _DeviceScreenState extends State<DeviceScreen> {
   );
 
   Future<void> _connect(ScanResult result, String kind) async {
-    _scanStatus = null;
+    setState(() {
+      _scanKind = kind;
+      _scanStatus = kind == 'h10'
+          ? 'Connecting to H10…'
+          : 'Opening O2Ring connection…';
+    });
     if (kind == 'ring') {
       if (!mounted) return;
       await Navigator.of(context).push(
@@ -269,6 +274,14 @@ class _DeviceScreenState extends State<DeviceScreen> {
       return;
     }
     await _controller.connect(result.device);
+    if (mounted) {
+      setState(() => _scanStatus = _controller.connectionStatus);
+      if (!_controller.connected) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_controller.connectionStatus)));
+      }
+    }
   }
 
   Future<void> _disconnect() => _controller.disconnect();
@@ -293,7 +306,13 @@ class _DeviceScreenState extends State<DeviceScreen> {
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                     Text(_controller.deviceName),
-                    Text(_controller.error ?? _controller.connectionStatus),
+                    Text(_controller.connectionStatus),
+                    if (_controller.error != null) Text(_controller.error!),
+                    Text(
+                      _controller.heartRate == null
+                          ? 'No H10 heart-rate data received yet'
+                          : 'H10 heart rate: ${_controller.heartRate} bpm · last data ${_controller.lastDataAge?.inSeconds ?? 0}s ago',
+                    ),
                     if (_controller.polarId != null) ...[
                       Text('H10 ACC: ${_controller.accelerationStatus}'),
                       Text('H10 ECG: ${_controller.ecgStatus}'),
@@ -309,7 +328,14 @@ class _DeviceScreenState extends State<DeviceScreen> {
                         onPressed: _controller.busy ? null : _disconnect,
                         child: const Text('Disconnect H10'),
                       ),
-                    if (_controller.sessionLogger == null) _scanControls('h10'),
+                    if (_controller.sessionLogger == null ||
+                        _controller.polarId == null)
+                      _scanControls('h10'),
+                    if (_controller.sessionLogger != null &&
+                        _controller.polarId == null)
+                      const Text(
+                        'Connect an H10 to add heart rate and RR to this recording.',
+                      ),
                     if (_controller.sessionLogger != null)
                       const Text(
                         'Reconnect keeps this session. Stop before selecting a different H10.',
@@ -334,10 +360,41 @@ class _DeviceScreenState extends State<DeviceScreen> {
                     Text(
                       'O2Ring rows recorded: ${_controller.recordedRingReadings}',
                     ),
+                    Text(
+                      _controller.latestRingReading == null
+                          ? 'No O2Ring measurements received yet'
+                          : 'SpO2 ${_controller.latestRingReading!.spo2}% · pulse ${_controller.latestRingReading!.pulse} bpm',
+                    ),
                     if (_controller.ringDevice != null)
                       Wrap(
                         spacing: 8,
                         children: [
+                          OutlinedButton.icon(
+                            onPressed: _controller.busy || _scanning
+                                ? null
+                                : () async {
+                                    try {
+                                      await _controller.connectRing(
+                                        _controller.ringDevice!,
+                                      );
+                                    } catch (error) {
+                                      if (!context.mounted) {
+                                        return;
+                                      }
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            'O2Ring connection failed: $error',
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                  },
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('Reconnect O2Ring'),
+                          ),
                           OutlinedButton.icon(
                             onPressed: () => Navigator.of(context).push(
                               MaterialPageRoute<void>(
@@ -355,8 +412,14 @@ class _DeviceScreenState extends State<DeviceScreen> {
                           ),
                         ],
                       ),
-                    if (_controller.sessionLogger == null)
+                    if (_controller.sessionLogger == null ||
+                        _controller.ringId == null)
                       _scanControls('ring'),
+                    if (_controller.sessionLogger != null &&
+                        _controller.ringId == null)
+                      const Text(
+                        'Connect an O2Ring to add oxygen and pulse to this recording.',
+                      ),
                   ],
                 ),
               ),

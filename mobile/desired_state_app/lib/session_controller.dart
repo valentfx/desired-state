@@ -270,6 +270,11 @@ class SessionController extends ChangeNotifier {
     _changed();
     try {
       await ring.connect(device);
+      await sessionLogger?.registerDevice(
+        deviceId: ringId!,
+        name: ringName,
+        kind: 'wellue_o2ring',
+      );
       _event('o2ring_connected', description: ringId);
     } finally {
       _ringConnectInFlight = false;
@@ -355,7 +360,13 @@ class SessionController extends ChangeNotifier {
       ? Duration.zero
       : DateTime.now().difference(sessionStartedAt!);
   bool get _recording => recordingState == RecordingState.recording;
-  bool get canReconnect => sessionLogger != null && !busy && !recovering;
+  bool get canReconnect =>
+      sessionLogger != null &&
+      _target != null &&
+      polarId != null &&
+      !busy &&
+      !connecting &&
+      !recovering;
 
   void _changed() {
     if (!_disposed) notifyListeners();
@@ -465,7 +476,14 @@ class SessionController extends ChangeNotifier {
   }
 
   Future<void> connect(BluetoothDevice device) async {
-    if (sessionLogger != null || connecting || busy) return;
+    if (connecting || busy) {
+      throw StateError('A device or session operation is already running.');
+    }
+    if (sessionLogger != null && polarId != null) {
+      throw StateError(
+        'Use Reconnect H10 for this strap, or stop before selecting another H10.',
+      );
+    }
     final epoch = ++_epoch;
     _target = device;
     _lastData = null;
@@ -476,13 +494,22 @@ class SessionController extends ChangeNotifier {
     try {
       await polar.connect(device);
       if (epoch != _epoch || _disposed) return;
-      connected = true;
       final name = device.platformName.trim();
       deviceName = name.isEmpty ? device.remoteId.str : name;
       polarId =
           (RegExp(r'([A-Za-z0-9]{8})$').firstMatch(deviceName)?.group(1) ??
                   device.remoteId.str)
               .toUpperCase();
+      await sessionLogger?.registerDevice(
+        deviceId: polarId!,
+        name: deviceName,
+        kind: 'polar_h10',
+      );
+      if (epoch != _epoch || _disposed) return;
+      connected = true;
+      if (sessionLogger != null) {
+        _break('H10 attached during recording');
+      }
       _waitingSince = _now;
       connectionStatus = 'Connected, waiting for data';
       status = 'Connected — ready to record';

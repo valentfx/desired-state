@@ -93,6 +93,45 @@ class SessionLogger {
     return logger;
   }
 
+  /// Attach a previously absent sensor without replacing the primary identity.
+  Future<void> registerDevice({
+    required String deviceId,
+    required String name,
+    required String kind,
+  }) {
+    if (_closed) {
+      throw StateError('Session has already stopped');
+    }
+    return _enqueue(() async {
+      final file = File('${directory.path}/manifest.json');
+      final manifest =
+          jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+      final devices = Map<String, dynamic>.from(manifest['devices'] as Map);
+      if (devices.containsKey(deviceId)) {
+        return;
+      }
+      devices[deviceId] = {'name': name, 'kind': kind};
+      final assignments = Map<String, dynamic>.from(
+        manifest['assignments'] as Map,
+      );
+      assignments[deviceId] = participantName;
+      manifest['devices'] = devices;
+      manifest['assignments'] = assignments;
+      await _writeJson('manifest.json', manifest);
+      await _appendJsonl('events', {
+        'session_id': sessionId,
+        'polar_id': polarId,
+        'user_id': participantName,
+        'event': 'device_attached',
+        'received_utc': DateTime.now().toUtc().toIso8601String(),
+        'device_id': deviceId,
+        'sensor_kind': kind,
+        'description': name,
+      });
+      await _flushSinks();
+    });
+  }
+
   Future<void> logMeasurement({
     required String polarId,
     required String participantName,
