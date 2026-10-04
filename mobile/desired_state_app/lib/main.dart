@@ -12,10 +12,10 @@ import 'app_navigation.dart';
 import 'device_screen.dart';
 import 'overview_screen.dart';
 import 'participant_tools.dart';
-import 'eeg_live_panel.dart';
-import 'ecg_live_panel.dart';
+import 'compact_eeg_panel.dart';
+import 'preferences_screen.dart';
+import 'session_timeline_screen.dart';
 import 'session_review_screen.dart';
-import 'practice_screen.dart';
 import 'settings_screen.dart';
 
 void main() {
@@ -117,27 +117,6 @@ class _SessionHomeState extends State<SessionHome> {
                 onTap: () => _select(0),
               ),
               ListTile(
-                leading: const Icon(Icons.person_outline),
-                title: const Text('Participants'),
-                onTap: () => _open(
-                  ParticipantsScreen(
-                    store: ParticipantStore(
-                      directoryProvider: widget.controller.directoryProvider,
-                    ),
-                    onViewSessions: (profile) => _navigator.currentState?.push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => HistoryScreen(
-                          controller: widget.controller,
-                          initialParticipantId: profile.id,
-                          analyze: true,
-                          onLive: () => _select(1),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              ListTile(
                 leading: const Icon(Icons.monitor_heart_outlined),
                 title: const Text('Live'),
                 onTap: () => _select(1),
@@ -146,12 +125,6 @@ class _SessionHomeState extends State<SessionHome> {
                 leading: const Icon(Icons.insights_outlined),
                 title: const Text('Analyze'),
                 onTap: () => _select(2),
-              ),
-              ListTile(
-                leading: const Icon(Icons.spa_outlined),
-                title: const Text('Practice'),
-                onTap: () =>
-                    _open(PracticeScreen(controller: widget.controller)),
               ),
               ListTile(
                 leading: const Icon(Icons.bluetooth),
@@ -243,7 +216,6 @@ class _CollectorScreenState extends State<CollectorScreen> {
   SessionLogger? get _sessionLogger => _controller.sessionLogger;
   SessionLogger? get _lastSessionLogger => _controller.lastSessionLogger;
 
-  final _eegPanelKey = GlobalKey();
   final _participantNameController = TextEditingController();
   final _eventDescriptionController = TextEditingController();
 
@@ -252,10 +224,17 @@ class _CollectorScreenState extends State<CollectorScreen> {
     super.initState();
     _controller = widget.controller;
     _controller.addListener(_refresh);
+    _controller.loadUserSettings().catchError((Object error) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
   }
 
   void _refresh() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   void _openDevice() => Navigator.of(context).push(
@@ -282,6 +261,33 @@ class _CollectorScreenState extends State<CollectorScreen> {
                 if (_controller.polarId != null) _accLine(),
                 if (_controller.ringId != null) _ringLine(),
                 const SizedBox(height: 16),
+                ListTile(
+                  leading: const Icon(Icons.dashboard_customize_outlined),
+                  title: const Text('Customize Live'),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          PreferencesScreen(controller: _controller),
+                    ),
+                  ),
+                ),
+                if (_sessionLogger != null)
+                  ListTile(
+                    leading: const Icon(Icons.show_chart),
+                    title: const Text('All session signals'),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => SessionTimelineScreen(
+                          directory: _sessionLogger!.directory,
+                          origin: _controller.sessionStartedAt!,
+                          title: 'Current recording',
+                          controller: _controller,
+                        ),
+                      ),
+                    ),
+                  ),
                 ListTile(
                   leading: const Icon(Icons.history),
                   title: const Text('History'),
@@ -319,27 +325,6 @@ class _CollectorScreenState extends State<CollectorScreen> {
     ),
   );
 
-  Widget _streamStatus() => InkWell(
-    onTap: _openAdvanced,
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (_controller.polarId != null)
-          Text(
-            'H10 · ${_controller.connectionStatus} · HR packet ${_controller.lastDataAge?.inSeconds.toString() ?? '--'}s ago · ACC ${_controller.latestAcceleration != null && DateTime.now().difference(_controller.latestAcceleration!.receivedAt) < const Duration(seconds: 5) && _controller.connected ? 'fresh' : 'no fresh data'}',
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-        if (_controller.ringId != null)
-          Text(
-            'O2Ring · ${_controller.ringStatus.name} · SpO₂ ${_controller.ringDataFresh ? _controller.latestRingReading?.spo2 ?? '--' : '--'}% · ${_controller.ringDataFresh ? 'fresh' : 'no fresh data'}',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Colors.deepPurple),
-          ),
-      ],
-    ),
-  );
   @override
   void dispose() {
     _controller.removeListener(_refresh);
@@ -361,7 +346,9 @@ class _CollectorScreenState extends State<CollectorScreen> {
       store: ParticipantStore(directoryProvider: _controller.directoryProvider),
       correction: active,
     );
-    if (values == null) return;
+    if (values == null) {
+      return;
+    }
     try {
       if (active) {
         await _controller.editRecordingParticipant(
@@ -375,7 +362,9 @@ class _CollectorScreenState extends State<CollectorScreen> {
         _controller.participantInfo = values.$2;
         _controller.participantId = values.$3;
       }
-      if (mounted) setState(() {});
+      if (mounted) {
+        setState(() {});
+      }
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -403,7 +392,9 @@ class _CollectorScreenState extends State<CollectorScreen> {
         profileId: _controller.participantId,
       );
     }
-    if (mounted) setState(() => _showConnect = false);
+    if (mounted) {
+      setState(() => _showConnect = false);
+    }
   }
 
   void _pauseSession() => _controller.pause();
@@ -425,7 +416,9 @@ class _CollectorScreenState extends State<CollectorScreen> {
 
   Future<void> _openSessionNotes() async {
     final logger = _sessionLogger ?? _lastSessionLogger;
-    if (logger == null) return;
+    if (logger == null) {
+      return;
+    }
     // Only the owning Live screen edits annotations during recording.
     // History's separate repository retains its active-session write guard.
     final repository = SessionHistoryRepository(
@@ -433,7 +426,9 @@ class _CollectorScreenState extends State<CollectorScreen> {
     );
     try {
       final entry = await repository.readEntry(logger.directory);
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       await Navigator.push(
         context,
         MaterialPageRoute<void>(
@@ -490,7 +485,9 @@ class _CollectorScreenState extends State<CollectorScreen> {
 
   Future<void> _reviewLastSession() async {
     final logger = _lastSessionLogger;
-    if (logger == null || _controller.busy) return;
+    if (logger == null || _controller.busy) {
+      return;
+    }
     try {
       final repository = SessionHistoryRepository(
         directoryProvider: _controller.directoryProvider,
@@ -498,7 +495,9 @@ class _CollectorScreenState extends State<CollectorScreen> {
       );
       final entry = await repository.readEntry(logger.directory);
       final session = await repository.open(entry);
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       await Navigator.push(
         context,
         MaterialPageRoute<void>(
@@ -520,7 +519,9 @@ class _CollectorScreenState extends State<CollectorScreen> {
 
   Future<void> _exportLastSession() async {
     final logger = _lastSessionLogger;
-    if (logger == null || _exporting) return;
+    if (logger == null || _exporting) {
+      return;
+    }
     setState(() => _exporting = true);
     try {
       final zip = await logger.createExportZip();
@@ -538,7 +539,9 @@ class _CollectorScreenState extends State<CollectorScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _exporting = false);
+      if (mounted) {
+        setState(() => _exporting = false);
+      }
     }
   }
 
@@ -562,12 +565,12 @@ class _CollectorScreenState extends State<CollectorScreen> {
               onPressed: _openSessionNotes,
             ),
           IconButton(
-            tooltip: 'Processing & plots',
+            tooltip: 'Live settings',
             icon: const Icon(Icons.tune),
             onPressed: () => Navigator.push(
               context,
               MaterialPageRoute<void>(
-                builder: (_) => ProcessingScreen(controller: _controller),
+                builder: (_) => PreferencesScreen(controller: _controller),
               ),
             ),
           ),
@@ -608,13 +611,17 @@ class _CollectorScreenState extends State<CollectorScreen> {
       ),
       const SizedBox(height: 4),
       Text(_status),
-      _streamStatus(),
-      if (_controller.polarId != null) _accLine(),
-      if (_controller.ringId != null) _ringLine(),
-      EegLivePanel(key: _eegPanelKey, controller: _controller),
-      EcgLivePanel(controller: _controller),
-      PracticeLiveControls(controller: _controller),
-      QuickMarkerBar(controller: _controller),
+      Wrap(
+        spacing: 16,
+        children: [
+          Text('BPM ${_controller.heartRate ?? '--'}'),
+          Text('RMSSD ${_controller.rmssd?.toStringAsFixed(1) ?? '--'} ms'),
+          if (_controller.preferences.showOxygen)
+            Text('SpO2 ${_controller.latestRingReading?.spo2 ?? '--'}%'),
+        ],
+      ),
+      if (_controller.preferences.showEeg)
+        CompactEegPanel(controller: _controller),
       if (_lastSessionLogger != null)
         TextButton(
           onPressed: () => setState(() => _showConnect = false),
@@ -697,59 +704,29 @@ class _CollectorScreenState extends State<CollectorScreen> {
             controller: _controller,
             embedded: true,
             header: [
-              EegLivePanel(key: _eegPanelKey, controller: _controller),
-              EcgLivePanel(controller: _controller),
-              PracticeLiveControls(controller: _controller),
-              _streamStatus(),
-              if (_controller.polarId != null) _accLine(),
-              if (_controller.ringId != null) _ringLine(),
-              Row(
+              Wrap(
+                spacing: 12,
+                runSpacing: 4,
                 children: [
-                  Icon(
-                    Icons.circle,
-                    size: 10,
-                    color: _recordingState == RecordingState.recording
-                        ? Colors.red
-                        : Colors.amber,
-                  ),
-                  const SizedBox(width: 4),
                   Text(
                     _recordingState == RecordingState.recording
-                        ? 'REC'
+                        ? '● REC'
                         : 'PAUSED',
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      '${_participantName()} | $_deviceName',
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Edit participant',
-                    onPressed: _controller.busy ? null : _editParticipant,
-                    icon: const Icon(Icons.person_outline),
-                  ),
+                  Text(_participantName()),
                   Text(_formatDuration(_sessionElapsed)),
+                  if (_controller.preferences.showOxygen)
+                    Text(
+                      'SpO2 ${_controller.ringDataFresh ? _controller.latestRingReading?.spo2 ?? '--' : '--'}%',
+                    ),
+                  if (_controller.preferences.showPosture &&
+                      _controller.polarId != null)
+                    Text(_controller.currentPosture),
                 ],
               ),
-              InkWell(
-                onTap: _openDevice,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Text(
-                    '${_controller.connectionStatus} | last data ${_controller.lastDataAge?.inSeconds.toString() ?? '--'}s ago',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ),
-              if (_controller.error != null)
-                Text(
-                  _controller.error!,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
+              if (_controller.preferences.showEeg)
+                CompactEegPanel(controller: _controller),
+              if (_controller.error != null) Text(_controller.error!),
             ],
           ),
         ),

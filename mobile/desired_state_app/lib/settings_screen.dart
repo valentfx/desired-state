@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 
 import 'processing_screen.dart';
+import 'preferences_screen.dart';
+import 'participant_tools.dart';
+import 'practice_screen.dart';
+import 'history_screen.dart';
 import 'session_controller.dart';
 import 'session_history.dart';
 
@@ -12,6 +16,66 @@ class SettingsScreen extends StatelessWidget {
     appBar: AppBar(title: const Text('Settings')),
     body: ListView(
       children: [
+        ListTile(
+          leading: const Icon(Icons.person_outline),
+          title: const Text('Participants'),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute<void>(
+              builder: (_) => ParticipantsScreen(
+                store: ParticipantStore(
+                  directoryProvider: controller.directoryProvider,
+                ),
+                onViewSessions: (profile) => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => HistoryScreen(
+                      controller: controller,
+                      initialParticipantId: profile.id,
+                      analyze: true,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        ListTile(
+          leading: const Icon(Icons.spa_outlined),
+          title: const Text('Practice'),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute<void>(
+              builder: (_) => PracticeScreen(controller: controller),
+            ),
+          ),
+        ),
+        ListTile(
+          leading: const Icon(Icons.dashboard_customize_outlined),
+          title: const Text('Customize Live'),
+          subtitle: const Text(
+            'Visible metrics; recording remains independent',
+          ),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute<void>(
+              builder: (_) => PreferencesScreen(controller: controller),
+            ),
+          ),
+        ),
+        ListTile(
+          leading: const Icon(Icons.save_outlined),
+          title: const Text('Recording defaults'),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute<void>(
+              builder: (_) => PreferencesScreen(
+                controller: controller,
+                streams: const ['heart', 'ecg', 'acc', 'ring', 'muse', 'pmd'],
+              ),
+            ),
+          ),
+        ),
         ListTile(
           leading: const Icon(Icons.tune),
           title: const Text('Processing & plots'),

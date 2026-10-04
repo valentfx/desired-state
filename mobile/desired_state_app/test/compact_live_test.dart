@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:desired_state_app/device_screen.dart';
+import 'package:desired_state_app/device_detail_screen.dart';
 
 import 'dart:io';
 
@@ -256,13 +257,18 @@ void main() {
             .evaluate()
             .isNotEmpty,
       );
+      await tester.tap(find.text('Polar H10'));
+      await settleIo(
+        tester,
+        () => find.text('Reconnect H10').evaluate().isNotEmpty,
+      );
       expect(find.text('Scan for Polar H10'), findsNothing);
       await tester.scrollUntilVisible(
         find.text('Reconnect H10'),
         180,
         scrollable: find
             .descendant(
-              of: find.byType(DeviceScreen),
+              of: find.byType(DeviceDetailScreen),
               matching: find.byWidgetPredicate(
                 (widget) =>
                     widget is Scrollable &&
@@ -296,7 +302,15 @@ void main() {
         controller.analysisInputs.last.segment,
         isNot(controller.analysisInputs.first.segment),
       );
-      await tester.pageBack();
+      // Pop one completed route at a time. During animation both routes
+      // contain Back tooltips, so pageBack would be ambiguous.
+      await tester.pump(const Duration(seconds: 1));
+      await tester.tap(find.byType(BackButton).hitTestable());
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.tap(find.byType(BackButton).hitTestable());
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
       // Live may schedule frames continuously, and settings load from disk.
       // Wait for this route's usable state while allowing real I/O to run.
       await settleIo(

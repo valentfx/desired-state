@@ -58,7 +58,12 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(home: CollectorScreen(controller: controller)),
       );
-      await tester.tap(find.byTooltip('Processing & plots'));
+      await tester.tap(find.byTooltip('Live settings'));
+      await settleIo(
+        tester,
+        () => find.text('Processing & plots').evaluate().isNotEmpty,
+      );
+      await tester.tap(find.text('Processing & plots'));
       await settleIo(
         tester,
         () => find.textContaining('receipt-time window').evaluate().isNotEmpty,

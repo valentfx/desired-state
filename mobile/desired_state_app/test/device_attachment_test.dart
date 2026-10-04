@@ -9,6 +9,8 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'o2_ring_recording_test.dart' show FakeRing;
+import 'history_widgets_test.dart' show settleIo;
+
 import 'session_controller_test.dart' show FakePolar, FakeForeground, rows;
 
 Future<SessionController> athenaFixture(
@@ -116,9 +118,25 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(home: DeviceScreen(controller: controller)),
       );
+      await tester.tap(find.text('Polar H10'));
+      await settleIo(
+        tester,
+        () => find.text('Scan for Polar H10').evaluate().isNotEmpty,
+      );
       expect(find.text('Reconnect H10'), findsNothing);
       expect(find.text('Scan for Polar H10'), findsOneWidget);
       expect(find.text('No H10 heart-rate data received yet'), findsOneWidget);
+      // Finish the incoming route before tapping its visible Back button.
+      // Continuous diagnostics frames prevent a global pumpAndSettle.
+      await tester.pump(const Duration(seconds: 1));
+      await tester.tap(find.byType(BackButton).hitTestable());
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.tap(find.text('O2Ring').hitTestable());
+      await settleIo(
+        tester,
+        () => find.text('Scan for O2Ring').evaluate().isNotEmpty,
+      );
       await tester.scrollUntilVisible(
         find.text('Scan for O2Ring'),
         180,

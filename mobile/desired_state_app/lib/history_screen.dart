@@ -7,6 +7,7 @@ import 'session_history.dart';
 import 'participant_tools.dart';
 import 'processing_screen.dart';
 import 'session_review_screen.dart';
+import 'session_timeline_screen.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({
@@ -73,7 +74,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
   @override
   void didUpdateWidget(covariant HistoryScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.revision != oldWidget.revision) _refresh();
+    if (widget.revision != oldWidget.revision) {
+      _refresh();
+    }
   }
 
   @override
@@ -90,7 +93,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
       lastDate: DateTime(2200),
       initialDateRange: _dates,
     );
-    if (range != null && mounted) setState(() => _dates = range);
+    if (range != null && mounted) {
+      setState(() => _dates = range);
+    }
   }
 
   void _refresh() => setState(() {
@@ -117,7 +122,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
             } catch (error) {
               report = 'Storage inspection failed: $error';
             }
-            if (!context.mounted) return;
+            if (!context.mounted) {
+              return;
+            }
             await showDialog<void>(
               context: context,
               builder: (context) => AlertDialog(
@@ -355,7 +362,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                   ),
                                 ),
                               );
-                              if (mounted) _refresh();
+                              if (mounted) {
+                                _refresh();
+                              }
                             },
                     );
                   },
@@ -381,7 +390,9 @@ class RecordingHistoryBanner extends StatelessWidget {
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: controller,
     builder: (context, _) {
-      if (controller.sessionLogger == null) return const SizedBox.shrink();
+      if (controller.sessionLogger == null) {
+        return const SizedBox.shrink();
+      }
       return Material(
         color: Theme.of(context).colorScheme.secondaryContainer,
         child: ListTile(
@@ -389,11 +400,30 @@ class RecordingHistoryBanner extends StatelessWidget {
           title: Text(
             '${controller.recordingState == RecordingState.paused ? 'Paused' : 'Recording continues'} · ${controller.connectionStatus}',
           ),
-          trailing: TextButton(
-            onPressed:
-                onLive ??
-                () => Navigator.popUntil(context, (route) => route.isFirst),
-            child: const Text('Live'),
+          trailing: Wrap(
+            spacing: 4,
+            children: [
+              TextButton(
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => SessionTimelineScreen(
+                      directory: controller.sessionLogger!.directory,
+                      origin: controller.sessionStartedAt!,
+                      title: 'Current recording',
+                      controller: controller,
+                    ),
+                  ),
+                ),
+                child: const Text('Signals'),
+              ),
+              TextButton(
+                onPressed:
+                    onLive ??
+                    () => Navigator.popUntil(context, (route) => route.isFirst),
+                child: const Text('Live'),
+              ),
+            ],
           ),
         ),
       );
@@ -438,7 +468,9 @@ class _HistoryDetailScreenState extends State<HistoryDetailScreen> {
         ),
       ),
     );
-    if (mounted) _reload();
+    if (mounted) {
+      _reload();
+    }
   }
 
   Future<void> _export(HistoryEntry entry) async {
@@ -457,7 +489,9 @@ class _HistoryDetailScreenState extends State<HistoryDetailScreen> {
             .showSnackBar(SnackBar(content: Text('Could not export: $error')));
       }
     } finally {
-      if (mounted) setState(() => _exporting = false);
+      if (mounted) {
+        setState(() => _exporting = false);
+      }
     }
   }
 
@@ -472,7 +506,9 @@ class _HistoryDetailScreenState extends State<HistoryDetailScreen> {
           onPressed: () async {
             try {
               final session = await _loading;
-              if (!context.mounted) return;
+              if (!context.mounted) {
+                return;
+              }
               await Navigator.push(
                 context,
                 MaterialPageRoute<void>(
@@ -564,6 +600,31 @@ class _HistoryDetailScreenState extends State<HistoryDetailScreen> {
                         icon: const Icon(Icons.analytics_outlined),
                         label: const Text('Review session'),
                       ),
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.show_chart),
+                      label: const Text('All session signals'),
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => SessionTimelineScreen(
+                            directory: entry.directory,
+                            origin: entry.started ?? DateTime(1970),
+                            end: entry.events
+                                .map(
+                                  (e) =>
+                                      DateTime.tryParse('${e['received_utc']}'),
+                                )
+                                .whereType<DateTime>()
+                                .fold<DateTime?>(
+                                  null,
+                                  (a, b) => a == null || b.isAfter(a) ? b : a,
+                                ),
+                            title: 'Session signals',
+                            controller: widget.controller,
+                          ),
+                        ),
+                      ),
+                    ),
                     Text(
                       entry.participant,
                       style: Theme.of(context).textTheme.titleLarge,
@@ -587,7 +648,9 @@ class _HistoryDetailScreenState extends State<HistoryDetailScreen> {
                                 ),
                                 correction: true,
                               );
-                              if (values == null) return;
+                              if (values == null) {
+                                return;
+                              }
                               try {
                                 await widget.repository.saveMetadata(
                                   entry,
@@ -598,7 +661,9 @@ class _HistoryDetailScreenState extends State<HistoryDetailScreen> {
                                     participantId: values.$3,
                                   ),
                                 );
-                                if (mounted) _reload();
+                                if (mounted) {
+                                  _reload();
+                                }
                               } catch (error) {
                                 if (context.mounted) {
                                   ScaffoldMessenger.of(context).showSnackBar(
@@ -901,7 +966,9 @@ class _HistoryMetadataEditorState extends State<HistoryMetadataEditor> {
   }
 
   Future<void> _save() async {
-    if (_saving) return;
+    if (_saving) {
+      return;
+    }
     setState(() {
       _saving = true;
       _error = null;
@@ -930,11 +997,17 @@ class _HistoryMetadataEditorState extends State<HistoryMetadataEditor> {
         },
       );
       await widget.repository.saveMetadata(widget.entry, values);
-      if (mounted) Navigator.pop(context);
+      if (mounted) {
+        Navigator.pop(context);
+      }
     } catch (error) {
-      if (mounted) setState(() => _error = '$error');
+      if (mounted) {
+        setState(() => _error = '$error');
+      }
     } finally {
-      if (mounted) setState(() => _saving = false);
+      if (mounted) {
+        setState(() => _saving = false);
+      }
     }
   }
 

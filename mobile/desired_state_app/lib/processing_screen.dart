@@ -59,13 +59,17 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
   void initState() {
     super.initState();
     widget.controller.addListener(_changed);
-    if (widget.embedded) _preset = 60;
+    if (widget.embedded) {
+      _preset = 60;
+    }
     _ready = widget.controller.processing.ready;
     _load();
   }
 
   void _changed() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   Future<void> _load({bool retry = false}) async {
@@ -100,19 +104,25 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
         ),
       ),
     );
-    if (config == null || !mounted) return;
+    if (config == null || !mounted) {
+      return;
+    }
     await _apply(config);
   }
 
   Future<void> _apply(ProcessingConfig config) async {
-    if (_saving) return;
+    if (_saving) {
+      return;
+    }
     setState(() {
       _saving = true;
       _notice = null;
     });
     try {
       await widget.controller.saveProcessing(config);
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       setState(() {
         _selected = null;
         _error = null;
@@ -130,11 +140,17 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
           }
         }
       }
-      if (mounted) setState(() => _notice = 'Settings applied');
+      if (mounted) {
+        setState(() => _notice = 'Settings applied');
+      }
     } catch (e) {
-      if (mounted) setState(() => _error = 'Settings not fully saved: $e');
+      if (mounted) {
+        setState(() => _error = 'Settings not fully saved: $e');
+      }
     } finally {
-      if (mounted) setState(() => _saving = false);
+      if (mounted) {
+        setState(() => _saving = false);
+      }
     }
   }
 
@@ -360,7 +376,9 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                   min: 0,
                   max: (times.length - 1).toDouble(),
                   onChanged: (value) {
-                    if (value.end - value.start < 1) return;
+                    if (value.end - value.start < 1) {
+                      return;
+                    }
                     setState(() {
                       _follow = false;
                       _left = times[value.start.round()];
@@ -412,7 +430,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
         children: [
           ...widget.header,
           panel(
-            400.0 +
+            270.0 +
                 (summaries.length - 2).clamp(0, 99) * 24 +
                 (MediaQuery.textScalerOf(context).scale(14) - 14) * 12,
           ),
@@ -606,7 +624,9 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                     max: (times.length - 1).toDouble(),
                     divisions: times.length - 1,
                     onChanged: (value) {
-                      if (value.end - value.start < 1) return;
+                      if (value.end - value.start < 1) {
+                        return;
+                      }
                       setState(() {
                         _follow = false;
                         _left = times[value.start.round()];
@@ -696,7 +716,9 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
               ],
             ),
     );
-    if (widget.embedded) return content;
+    if (widget.embedded) {
+      return content;
+    }
     return Scaffold(
       appBar: AppBar(
         title: const Text('Processing & plots'),
@@ -831,7 +853,9 @@ class _ProcessingEditorState extends State<ProcessingEditor> {
   String _presetName = 'Current / modified';
   bool _busy = false;
   Future<void> _operation(Future<void> Function() action) async {
-    if (_busy) return;
+    if (_busy) {
+      return;
+    }
     setState(() {
       _busy = true;
       _error = null;
@@ -839,9 +863,13 @@ class _ProcessingEditorState extends State<ProcessingEditor> {
     try {
       await action();
     } catch (e) {
-      if (mounted) setState(() => _error = '$e');
+      if (mounted) {
+        setState(() => _error = '$e');
+      }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() => _busy = false);
+      }
     }
   }
 
@@ -886,7 +914,9 @@ class _ProcessingEditorState extends State<ProcessingEditor> {
   Future<void> _choosePreset() => _operation(() async {
     final defaultConfig = await loadDefaultProcessing();
     final custom = await _presets.load();
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
     final choices = [
       ProcessingPreset('Default', defaultConfig),
       ProcessingPreset(
@@ -910,15 +940,21 @@ class _ProcessingEditorState extends State<ProcessingEditor> {
         ),
       ),
     );
-    if (choice != null && mounted) _open(choice);
+    if (choice != null && mounted) {
+      _open(choice);
+    }
   });
   Future<void> _savePreset() => _operation(() async {
     final config = _read();
     final name = await _text('Save preset');
-    if (name == null) return;
+    if (name == null) {
+      return;
+    }
     final preset = ProcessingPreset(name.trim(), config);
     await _presets.save(preset);
-    if (mounted) setState(() => _presetName = preset.name);
+    if (mounted) {
+      setState(() => _presetName = preset.name);
+    }
   });
   Future<void> _exportPreset() => _operation(() async {
     final preset = ProcessingPreset(_presetName, _read());
@@ -935,9 +971,13 @@ class _ProcessingEditorState extends State<ProcessingEditor> {
   });
   Future<void> _importPreset() => _operation(() async {
     final text = await _text('Import preset JSON', json: true);
-    if (text == null) return;
+    if (text == null) {
+      return;
+    }
     final preset = ProcessingPreset.decode(text);
-    if (mounted) _open(preset);
+    if (mounted) {
+      _open(preset);
+    }
   });
 
   @override

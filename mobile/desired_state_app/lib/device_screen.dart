@@ -5,7 +5,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'session_controller.dart';
 import 'o2_ring_service.dart';
 import 'o2_ring_diagnostics_screen.dart';
-import 'eeg_live_panel.dart';
+import 'device_detail_screen.dart';
 
 /// Device discovery lives here; acquisition remains owned by SessionController.
 class DeviceScreen extends StatefulWidget {
@@ -21,13 +21,151 @@ class _DeviceScreenState extends State<DeviceScreen> {
   String _scanKind = 'h10';
   bool _scanning = false;
   String? _scanStatus;
+  final _controlsChanged = ValueNotifier<int>(0);
   final TextEditingController _athenaSerial = TextEditingController();
 
   @override
   void dispose() {
+    _controlsChanged.dispose();
     _athenaSerial.dispose();
     super.dispose();
   }
+
+  void _update(VoidCallback change) {
+    if (!mounted) {
+      return;
+    }
+    setState(change);
+    _controlsChanged.value++;
+  }
+
+  void _detail(String kind) => Navigator.push(
+    context,
+    MaterialPageRoute<void>(
+      builder: (_) => DeviceDetailScreen(
+        controller: _controller,
+        kind: kind,
+        controlsChanged: _controlsChanged,
+        connectionBuilder: () => kind == 'h10'
+            ? _h10Card()
+            : kind == 'ring'
+            ? _ringCard()
+            : _athenaCard(),
+      ),
+    ),
+  );
+  Widget _h10Card() => Card(
+    child: Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Polar H10', style: Theme.of(context).textTheme.titleLarge),
+          Text(_controller.deviceName),
+          Text(_controller.connectionStatus),
+          if (_controller.error != null) Text(_controller.error!),
+          Text(
+            _controller.heartRate == null
+                ? 'No H10 heart-rate data received yet'
+                : 'H10 heart rate: ${_controller.heartRate} bpm · last data ${_controller.lastDataAge?.inSeconds ?? 0}s ago',
+          ),
+          if (_controller.polarId != null) ...[
+            Text('H10 ACC: ${_controller.accelerationStatus}'),
+            Text('H10 ECG: ${_controller.ecgStatus}'),
+          ],
+          if (_controller.canReconnect)
+            FilledButton.icon(
+              onPressed: _controller.reconnect,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Reconnect H10'),
+            ),
+          if (_controller.connected || _controller.polarId != null)
+            TextButton(
+              onPressed: _controller.busy ? null : _disconnect,
+              child: const Text('Disconnect H10'),
+            ),
+          if (_controller.sessionLogger == null || _controller.polarId == null)
+            _scanControls('h10'),
+          if (_controller.sessionLogger != null && _controller.polarId == null)
+            const Text(
+              'Connect an H10 to add heart rate and RR to this recording.',
+            ),
+          if (_controller.sessionLogger != null)
+            const Text(
+              'Reconnect keeps this session. Stop before selecting a different H10.',
+            ),
+        ],
+      ),
+    ),
+  );
+  Widget _ringCard() => Card(
+    child: Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('O2Ring', style: Theme.of(context).textTheme.titleLarge),
+          Text('${_controller.ringName} · ${_controller.ringStatus.name}'),
+          Text('O2Ring rows recorded: ${_controller.recordedRingReadings}'),
+          Text(
+            _controller.latestRingReading == null
+                ? 'No O2Ring measurements received yet'
+                : 'SpO2 ${_controller.latestRingReading!.spo2}% · pulse ${_controller.latestRingReading!.pulse} bpm',
+          ),
+          if (_controller.ringDevice != null)
+            Wrap(
+              spacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: _controller.busy || _scanning
+                      ? null
+                      : () async {
+                          try {
+                            await _controller.connectRing(
+                              _controller.ringDevice!,
+                            );
+                          } catch (error) {
+                            if (!mounted) {
+                              return;
+                            }
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'O2Ring connection failed: $error',
+                                ),
+                              ),
+                            );
+                          }
+                        },
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Reconnect O2Ring'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          O2RingDiagnosticsScreen(controller: _controller),
+                    ),
+                  ),
+                  icon: const Icon(Icons.sensors),
+                  label: const Text('O2Ring diagnostics'),
+                ),
+                TextButton(
+                  onPressed: _controller.disconnectRing,
+                  child: const Text('Disconnect O2Ring'),
+                ),
+              ],
+            ),
+          if (_controller.sessionLogger == null || _controller.ringId == null)
+            _scanControls('ring'),
+          if (_controller.sessionLogger != null && _controller.ringId == null)
+            const Text(
+              'Connect an O2Ring to add oxygen and pulse to this recording.',
+            ),
+        ],
+      ),
+    ),
+  );
 
   Future<void> _connectAthena() async {
     final permissions = await [
@@ -114,20 +252,6 @@ class _DeviceScreenState extends State<DeviceScreen> {
                       for (final entry in muse.latestEeg.entries)
                         Text('${entry.key}: ${entry.value.toStringAsFixed(2)}'),
                     ],
-                    if (muse.eegHistory.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      const Text('Raw EEG · shared zero and µV scale'),
-                      SizedBox(
-                        height: 150,
-                        width: double.infinity,
-                        child: CustomPaint(
-                          painter: _MuseEegPainter(
-                            muse.eegHistory,
-                            muse.eegRate,
-                          ),
-                        ),
-                      ),
-                    ],
                     if (muse.latestAccel.isNotEmpty)
                       Text(
                         'Motion latest · ${muse.latestAccel.entries.map((e) => '${e.key} ${e.value.toStringAsFixed(3)}').join(' · ')}',
@@ -158,8 +282,10 @@ class _DeviceScreenState extends State<DeviceScreen> {
   }
 
   Future<void> _scan(String kind) async {
-    if (_scanning) return;
-    setState(() {
+    if (_scanning) {
+      return;
+    }
+    _update(() {
       _scanning = true;
       _scanKind = kind;
       _results[kind] = [];
@@ -170,30 +296,36 @@ class _DeviceScreenState extends State<DeviceScreen> {
 
     try {
       final permissionOk = await _requestPermissions();
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       if (!permissionOk) {
-        setState(() => _scanStatus = 'Bluetooth permission denied');
+        _update(() => _scanStatus = 'Bluetooth permission denied');
         return;
       }
       final results = await _scanOne(kind);
 
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
-      setState(() {
+      _update(() {
         _results[kind] = results;
         _scanStatus = results.isEmpty
             ? 'No supported device found'
             : 'Found ${results.length} device(s)';
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
-      setState(() {
+      _update(() {
         _scanStatus = 'Scan error: $e';
       });
     } finally {
       if (mounted) {
-        setState(() {
+        _update(() {
           _scanning = false;
         });
       }
@@ -201,7 +333,9 @@ class _DeviceScreenState extends State<DeviceScreen> {
   }
 
   Future<List<ScanResult>> _scanOne(String kind) async {
-    if (kind == 'h10') return _controller.polar.scan();
+    if (kind == 'h10') {
+      return _controller.polar.scan();
+    }
     final adapter = O2RingService();
     try {
       return await adapter.scan();
@@ -257,14 +391,16 @@ class _DeviceScreenState extends State<DeviceScreen> {
   );
 
   Future<void> _connect(ScanResult result, String kind) async {
-    setState(() {
+    _update(() {
       _scanKind = kind;
       _scanStatus = kind == 'h10'
           ? 'Connecting to H10…'
           : 'Opening O2Ring connection…';
     });
     if (kind == 'ring') {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (_) =>
@@ -275,7 +411,7 @@ class _DeviceScreenState extends State<DeviceScreen> {
     }
     await _controller.connect(result.device);
     if (mounted) {
-      setState(() => _scanStatus = _controller.connectionStatus);
+      _update(() => _scanStatus = _controller.connectionStatus);
       if (!_controller.connected) {
         ScaffoldMessenger.of(
           context,
@@ -295,183 +431,33 @@ class _DeviceScreenState extends State<DeviceScreen> {
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Polar H10',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    Text(_controller.deviceName),
-                    Text(_controller.connectionStatus),
-                    if (_controller.error != null) Text(_controller.error!),
-                    Text(
-                      _controller.heartRate == null
-                          ? 'No H10 heart-rate data received yet'
-                          : 'H10 heart rate: ${_controller.heartRate} bpm · last data ${_controller.lastDataAge?.inSeconds ?? 0}s ago',
-                    ),
-                    if (_controller.polarId != null) ...[
-                      Text('H10 ACC: ${_controller.accelerationStatus}'),
-                      Text('H10 ECG: ${_controller.ecgStatus}'),
-                    ],
-                    if (_controller.canReconnect)
-                      FilledButton.icon(
-                        onPressed: _controller.reconnect,
-                        icon: const Icon(Icons.refresh),
-                        label: const Text('Reconnect H10'),
-                      ),
-                    if (_controller.connected || _controller.polarId != null)
-                      TextButton(
-                        onPressed: _controller.busy ? null : _disconnect,
-                        child: const Text('Disconnect H10'),
-                      ),
-                    if (_controller.sessionLogger == null ||
-                        _controller.polarId == null)
-                      _scanControls('h10'),
-                    if (_controller.sessionLogger != null &&
-                        _controller.polarId == null)
-                      const Text(
-                        'Connect an H10 to add heart rate and RR to this recording.',
-                      ),
-                    if (_controller.sessionLogger != null)
-                      const Text(
-                        'Reconnect keeps this session. Stop before selecting a different H10.',
-                      ),
-                  ],
-                ),
-              ),
+            ListTile(
+              leading: const Icon(Icons.monitor_heart_outlined),
+              title: const Text('Polar H10'),
+              subtitle: Text(_controller.connectionStatus),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _detail('h10'),
             ),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'O2Ring',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    Text(
-                      '${_controller.ringName} · ${_controller.ringStatus.name}',
-                    ),
-                    Text(
-                      'O2Ring rows recorded: ${_controller.recordedRingReadings}',
-                    ),
-                    Text(
-                      _controller.latestRingReading == null
-                          ? 'No O2Ring measurements received yet'
-                          : 'SpO2 ${_controller.latestRingReading!.spo2}% · pulse ${_controller.latestRingReading!.pulse} bpm',
-                    ),
-                    if (_controller.ringDevice != null)
-                      Wrap(
-                        spacing: 8,
-                        children: [
-                          OutlinedButton.icon(
-                            onPressed: _controller.busy || _scanning
-                                ? null
-                                : () async {
-                                    try {
-                                      await _controller.connectRing(
-                                        _controller.ringDevice!,
-                                      );
-                                    } catch (error) {
-                                      if (!context.mounted) {
-                                        return;
-                                      }
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                            'O2Ring connection failed: $error',
-                                          ),
-                                        ),
-                                      );
-                                    }
-                                  },
-                            icon: const Icon(Icons.refresh),
-                            label: const Text('Reconnect O2Ring'),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed: () => Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                builder: (_) => O2RingDiagnosticsScreen(
-                                  controller: _controller,
-                                ),
-                              ),
-                            ),
-                            icon: const Icon(Icons.sensors),
-                            label: const Text('O2Ring diagnostics'),
-                          ),
-                          TextButton(
-                            onPressed: _controller.disconnectRing,
-                            child: const Text('Disconnect O2Ring'),
-                          ),
-                        ],
-                      ),
-                    if (_controller.sessionLogger == null ||
-                        _controller.ringId == null)
-                      _scanControls('ring'),
-                    if (_controller.sessionLogger != null &&
-                        _controller.ringId == null)
-                      const Text(
-                        'Connect an O2Ring to add oxygen and pulse to this recording.',
-                      ),
-                  ],
-                ),
+            ListTile(
+              leading: const Icon(Icons.bloodtype_outlined),
+              title: const Text('O2Ring'),
+              subtitle: Text(
+                '${_controller.ringName} · ${_controller.ringStatus.name}',
               ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _detail('ring'),
             ),
             if (Theme.of(context).platform == TargetPlatform.android)
-              _athenaCard(),
+              ListTile(
+                leading: const Icon(Icons.psychology_outlined),
+                title: const Text('Muse S Athena'),
+                subtitle: Text(_controller.museAthena.status),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => _detail('muse'),
+              ),
           ],
         ),
       ),
     ),
   );
-}
-
-class _MuseEegPainter extends CustomPainter {
-  _MuseEegPainter(this.channels, this.rate);
-  final int rate;
-  final Map<String, List<double>> channels;
-  @override
-  void paint(Canvas canvas, Size size) {
-    final series = <String, List<(double, double)>>{};
-    var limit = 1.0;
-    for (final entry in channels.entries) {
-      series[entry.key] = [
-        for (var i = 0; i < entry.value.length; i++)
-          (
-            (i - entry.value.length + 1) / (rate > 0 ? rate : 256),
-            entry.value[i],
-          ),
-      ];
-      for (final value in entry.value) {
-        if (value.abs() > limit) limit = value.abs();
-      }
-    }
-    EegAxisPainter(
-      series,
-      left: -1024 / (rate > 0 ? rate : 256),
-      right: 0,
-      minimum: -limit,
-      maximum: limit,
-      yLabel: 'Raw EEG (µV)',
-      colors: {
-        for (final (index, key) in series.keys.indexed)
-          key: [
-            Colors.blue,
-            Colors.deepOrange,
-            Colors.teal,
-            Colors.purple,
-          ][index % 4],
-      },
-    ).paint(canvas, size);
-  }
-
-  @override
-  bool shouldRepaint(covariant _MuseEegPainter oldDelegate) => true;
 }

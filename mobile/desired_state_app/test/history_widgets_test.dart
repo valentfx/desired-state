@@ -270,7 +270,7 @@ void main() {
       );
       await settleIo(
         tester,
-        () => find.byTooltip('Processing & plots').evaluate().isNotEmpty,
+        () => find.byTooltip('Live settings').evaluate().isNotEmpty,
       );
       debugPrint('Active History: opening advanced tools');
       await tester.tap(find.byTooltip('Advanced tools'));

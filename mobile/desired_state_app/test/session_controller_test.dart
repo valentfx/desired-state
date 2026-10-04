@@ -398,18 +398,24 @@ void main() {
   testWidgets(
     'recording survives disposal and recreation of the collector screen',
     (tester) async {
+      final logger = controller.sessionLogger!;
       await tester.pumpWidget(
         MaterialApp(home: CollectorScreen(controller: controller)),
       );
       expect(find.byTooltip('Device connection'), findsOneWidget);
-      expect(find.textContaining('last data'), findsOneWidget);
+      expect(find.byTooltip('Stop recording'), findsOneWidget);
+      expect(controller.recordingState, RecordingState.recording);
       await tester.pumpWidget(const SizedBox());
       polar.emit([1000, 1010, 1020]);
       expect(controller.rrHistory.rawCount, 3);
       await tester.pumpWidget(
         MaterialApp(home: CollectorScreen(controller: controller)),
       );
-      expect(find.text('REC'), findsOneWidget);
+      expect(find.text('● REC'), findsOneWidget);
+      expect(find.byTooltip('Stop recording'), findsOneWidget);
+      expect(controller.sessionLogger, same(logger));
+      expect(controller.recordingState, RecordingState.recording);
+      expect(controller.rrHistory.rawCount, 3);
       expect(controller.timeline.length, 1);
       await tester.pumpWidget(const SizedBox());
     },

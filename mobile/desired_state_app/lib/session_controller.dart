@@ -16,6 +16,8 @@ import 'session_logger.dart';
 import 'quick_markers.dart';
 import 'processing.dart';
 import 'muse_athena_service.dart';
+import 'session_preferences.dart';
+import 'posture_calibration.dart';
 import 'session_history.dart';
 import 'participant_tools.dart';
 import 'practice_controller.dart';
@@ -60,7 +62,7 @@ class SessionController extends ChangeNotifier {
     museAthena.addListener(_onMuseChanged);
     _museBatchSubscription = museAthena.batches.listen((batch) {
       final logger = sessionLogger;
-      if (_recording && logger != null) {
+      if (_recording && preferences.records('muse') && logger != null) {
         recordedEegSamples += (batch['eegCount'] as num?)?.toInt() ?? 0;
         _save(
           logger.logMuseBatch({
@@ -75,7 +77,10 @@ class SessionController extends ChangeNotifier {
     });
     _ringPacketSubscription = ring.packets.listen((packet) {
       final logger = sessionLogger;
-      if (_recording && logger != null && ringId != null) {
+      if (_recording &&
+          preferences.records('ring') &&
+          logger != null &&
+          ringId != null) {
         _save(logger.logO2RingPacket(deviceId: ringId!, packet: packet));
       }
     });
@@ -89,8 +94,36 @@ class SessionController extends ChangeNotifier {
       _changed();
     });
     _accSubscription = polar.accelerationStream.listen((frame) {
-      if (_disposed) return;
+      if (_disposed) {
+        return;
+      }
       latestAcceleration = frame;
+      for (final sample in frame.samples) {
+        for (var axis = 0; axis < 3; axis++) {
+          accTrends[axis].add((frame.receivedAt, sample[axis].toDouble()));
+          if (accTrends[axis].length > 2000) {
+            accTrends[axis].removeAt(0);
+          }
+        }
+      }
+      final calibration = activeCalibration;
+      final nextPosture = calibration != null && calibration.deviceId == polarId
+          ? calibration.classify(frame.samples)
+          : 'Uncalibrated';
+      if (nextPosture != posture) {
+        posture = nextPosture;
+        if (_recording && preferences.records('acc')) {
+          _event(
+            'posture_estimate',
+            description: jsonEncode({
+              'position': posture,
+              'calibration_id': calibration?.id,
+              'method': 'gravity_nearest_angle_v1',
+              'derived': true,
+            }),
+          );
+        }
+      }
       final previous = _lastAccTimestamp;
       if (previous != null &&
           (frame.sensorNanoseconds <= previous ||
@@ -100,7 +133,10 @@ class SessionController extends ChangeNotifier {
       }
       _lastAccTimestamp = frame.sensorNanoseconds;
       final logger = sessionLogger;
-      if (_recording && logger != null && polarId != null) {
+      if (_recording &&
+          preferences.records('acc') &&
+          logger != null &&
+          polarId != null) {
         recordedAccSamples += frame.samples.length;
         _save(
           logger.logAcceleration(
@@ -113,7 +149,9 @@ class SessionController extends ChangeNotifier {
       _changed();
     });
     _ecgSubscription = polar.ecgStream.listen((frame) {
-      if (_disposed) return;
+      if (_disposed) {
+        return;
+      }
       final previous = _lastEcgTimestamp;
       final duration = BigInt.from(
         (frame.samples.length * 1000000000 / frame.sampleRate).round(),
@@ -142,6 +180,7 @@ class SessionController extends ChangeNotifier {
       final logger = sessionLogger;
       final since = _ecgRecordingSince;
       if (_recording &&
+          preferences.records('ecg') &&
           logger != null &&
           polarId != null &&
           since != null &&
@@ -167,7 +206,10 @@ class SessionController extends ChangeNotifier {
     });
     _pmdSubscription = polar.pmdPackets.listen((packet) {
       final logger = sessionLogger;
-      if (_recording && logger != null && polarId != null) {
+      if (_recording &&
+          preferences.records('pmd') &&
+          logger != null &&
+          polarId != null) {
         _save(logger.logPmdPacket(deviceId: polarId!, packet: packet));
       }
     });
@@ -182,9 +224,107 @@ class SessionController extends ChangeNotifier {
     });
     _dataSubscription = polar.dataStream.listen(_onData);
     _connectionSubscription = polar.connectionStream.listen((connected) {
-      if (!connected) _lostConnection();
+      if (!connected) {
+        _lostConnection();
+      }
     });
     _timer = Timer.periodic(tickInterval, (_) => _tick());
+  }
+
+  SessionPreferences preferences = SessionPreferences();
+  PostureCalibration? activeCalibration;
+  String posture = 'Uncalibrated';
+  String get currentPosture =>
+      connected &&
+          latestAcceleration != null &&
+          DateTime.now().difference(latestAcceleration!.receivedAt) <
+              const Duration(seconds: 5)
+      ? posture
+      : 'Unknown';
+  bool _preferencesLoaded = false;
+  final previewRr = RrHistory();
+  final List<(DateTime, double)> heartTrend = [],
+      hrvTrend = [],
+      rrTrend = [],
+      oxygenTrend = [],
+      pulseTrend = [];
+  final List<List<(DateTime, double)>> accTrends = [[], [], []];
+  void _trend(List<(DateTime, double)> list, DateTime time, double value) {
+    list.add((time, value));
+    if (list.length > 900) {
+      list.removeAt(0);
+    }
+  }
+
+  Future<void> loadUserSettings() async {
+    if (_preferencesLoaded) {
+      return;
+    }
+    preferences = await PreferencesStore(directoryProvider).load();
+    _preferencesLoaded = true;
+    _changed();
+  }
+
+  Future<void> savePreferences(SessionPreferences selected) async {
+    await PreferencesStore(directoryProvider).save(selected);
+    await sessionLogger?.writeEvent(
+      'session_preferences_changed',
+      description: jsonEncode(selected.toJson()),
+      flush: true,
+    );
+    if (selected.records('ecg') && !preferences.records('ecg')) {
+      _ecgRecordingSince = DateTime.now().toUtc();
+    }
+    if (selected.records('muse') && !preferences.records('muse')) {
+      _eegRecordingSince = DateTime.now().toUtc();
+    }
+    if (sessionLogger != null &&
+        preferences.recording
+            .difference(selected.recording)
+            .union(selected.recording.difference(preferences.recording))
+            .isNotEmpty) {
+      _break('Recording streams changed');
+    }
+    preferences = selected;
+    _preferencesLoaded = true;
+    _changed();
+  }
+
+  Future<void> selectCalibration(PostureCalibration calibration) async {
+    if (calibration.deviceId != polarId) {
+      throw StateError('Calibration belongs to another H10.');
+    }
+    await sessionLogger?.writeEvent(
+      'posture_calibration_selected',
+      description: jsonEncode(calibration.toJson()),
+      flush: true,
+    );
+    await CalibrationStore(directoryProvider).save(calibration);
+    activeCalibration = calibration;
+    posture = 'Unknown';
+    _changed();
+  }
+
+  Future<void> loadCalibration() async {
+    final options = await CalibrationStore(directoryProvider).load();
+    final matches = options
+        .where(
+          (v) =>
+              v.deviceId == polarId &&
+              (v.participantId == participantId || v.participantId == null),
+        )
+        .toList();
+    final personal = matches
+        .where((v) => v.participantId == participantId)
+        .toList();
+    if (matches.isNotEmpty) {
+      await selectCalibration(
+        personal.isNotEmpty ? personal.last : matches.last,
+      );
+    } else {
+      activeCalibration = null;
+      posture = 'Uncalibrated';
+    }
   }
 
   late final StreamSubscription<H10Acceleration> _accSubscription;
@@ -235,11 +375,22 @@ class SessionController extends ChangeNotifier {
       ringDataAge! < const Duration(seconds: 10);
 
   void _onRingReading(O2RingReading reading) {
-    if (_disposed) return;
+    if (_disposed) {
+      return;
+    }
     latestRingReading = reading;
+    if (reading.spo2 != null) {
+      _trend(oxygenTrend, reading.receivedAt, reading.spo2!.toDouble());
+    }
+    if (reading.pulse != null) {
+      _trend(pulseTrend, reading.receivedAt, reading.pulse!.toDouble());
+    }
     _lastRingData = _now;
     final logger = sessionLogger;
-    if (_recording && logger != null && ringId != null) {
+    if (_recording &&
+        preferences.records('ring') &&
+        logger != null &&
+        ringId != null) {
       recordedRingReadings++;
       _save(
         logger.logO2RingReading(
@@ -253,7 +404,9 @@ class SessionController extends ChangeNotifier {
   }
 
   Future<void> connectRing(BluetoothDevice device) async {
-    if (_ringConnectInFlight || _disposed) return;
+    if (_ringConnectInFlight || _disposed) {
+      return;
+    }
     if (sessionLogger != null &&
         ringId != null &&
         device.remoteId.str != ringId) {
@@ -283,7 +436,9 @@ class SessionController extends ChangeNotifier {
   }
 
   Future<void> disconnectRing() async {
-    if (_ringConnectInFlight) return;
+    if (_ringConnectInFlight) {
+      return;
+    }
     _ringManualDisconnect = true;
     _event('o2ring_manual_disconnect', description: ringId);
     await ring.disconnect();
@@ -369,7 +524,9 @@ class SessionController extends ChangeNotifier {
       !recovering;
 
   void _changed() {
-    if (!_disposed) notifyListeners();
+    if (!_disposed) {
+      notifyListeners();
+    }
   }
 
   late final StreamSubscription<Map<String, dynamic>> _museBatchSubscription;
@@ -385,7 +542,9 @@ class SessionController extends ChangeNotifier {
     String? profileId,
   }) async {
     final logger = sessionLogger;
-    if (logger == null || busy) throw StateError('No active session available');
+    if (logger == null || busy) {
+      throw StateError('No active session available');
+    }
     busy = true;
     _changed();
     try {
@@ -429,6 +588,7 @@ class SessionController extends ChangeNotifier {
     final frame = museAthena.latestBands;
     final logger = sessionLogger;
     if (_recording &&
+        preferences.records('muse') &&
         logger != null &&
         frame != null &&
         frame.time != _lastRecordedBand &&
@@ -493,7 +653,9 @@ class SessionController extends ChangeNotifier {
     _changed();
     try {
       await polar.connect(device);
-      if (epoch != _epoch || _disposed) return;
+      if (epoch != _epoch || _disposed) {
+        return;
+      }
       final name = device.platformName.trim();
       deviceName = name.isEmpty ? device.remoteId.str : name;
       polarId =
@@ -505,8 +667,11 @@ class SessionController extends ChangeNotifier {
         name: deviceName,
         kind: 'polar_h10',
       );
-      if (epoch != _epoch || _disposed) return;
+      if (epoch != _epoch || _disposed) {
+        return;
+      }
       connected = true;
+      await loadCalibration();
       if (sessionLogger != null) {
         _break('H10 attached during recording');
       }
@@ -514,12 +679,16 @@ class SessionController extends ChangeNotifier {
       connectionStatus = 'Connected, waiting for data';
       status = 'Connected — ready to record';
     } catch (failure) {
-      if (epoch != _epoch || _disposed) return;
+      if (epoch != _epoch || _disposed) {
+        return;
+      }
       connected = false;
       status = connectionStatus = 'Connection failed: $failure';
       await polar.disconnect();
     } finally {
-      if (epoch == _epoch) connecting = false;
+      if (epoch == _epoch) {
+        connecting = false;
+      }
       _changed();
     }
   }
@@ -529,7 +698,9 @@ class SessionController extends ChangeNotifier {
     String? participantProfileId,
     String description = '',
   }) async {
-    if (!canStart || sessionLogger != null || busy) return;
+    if (!canStart || sessionLogger != null || busy) {
+      return;
+    }
     busy = true;
     _changed();
     SessionLogger? opened;
@@ -548,6 +719,8 @@ class SessionController extends ChangeNotifier {
         participantId = null;
         participantInfo = '';
       }
+      await loadUserSettings();
+      await loadCalibration();
       await processing.load();
       opened = await SessionLogger.start(
         polarId: connected && polarId != null
@@ -651,6 +824,23 @@ class SessionController extends ChangeNotifier {
         'accelerometer_configuration_initial',
         description: accelerationStatus,
       );
+      await opened.writeEvent(
+        'session_preferences_initial',
+        description: jsonEncode(preferences.toJson()),
+        flush: true,
+      );
+      if (activeCalibration != null && activeCalibration!.deviceId == polarId) {
+        await File('${opened.directory.path}/posture_calibration.json')
+            .writeAsString(
+              '${jsonEncode(activeCalibration!.toJson())}\n',
+              flush: true,
+            );
+        await opened.writeEvent(
+          'posture_calibration_initial',
+          description: jsonEncode(activeCalibration!.toJson()),
+          flush: true,
+        );
+      }
       sessionLogger = opened;
       _visibleSessionId = opened.sessionId;
       lastSessionLogger = null;
@@ -669,7 +859,9 @@ class SessionController extends ChangeNotifier {
       status = 'Recording';
       _exhausted = false;
       _waitingSince = _now;
-      if (!connected && _target != null) _beginRecovery('disconnected');
+      if (!connected && _target != null) {
+        _beginRecovery('disconnected');
+      }
     } catch (failure) {
       await opened?.close();
       await _stopForeground();
@@ -683,8 +875,11 @@ class SessionController extends ChangeNotifier {
   void _break(String reason) {
     _ecgSegment++;
     _accSegment++;
-    if (_gap) return;
+    if (_gap) {
+      return;
+    }
     _gap = true;
+    previewRr.breakSequence();
     _segment++;
     rrHistory.breakSequence();
     rmssd = null;
@@ -692,7 +887,9 @@ class SessionController extends ChangeNotifier {
   }
 
   void _onData(PolarHeartRateData data) {
-    if (_disposed || _manualDisconnect || (!connected && !recovering)) return;
+    if (_disposed || _manualDisconnect || (!connected && !recovering)) {
+      return;
+    }
     final age = lastDataAge;
     if (_recording && age != null && age >= staleAfter && !_gap) {
       _event('measurement_stale');
@@ -700,10 +897,27 @@ class SessionController extends ChangeNotifier {
     }
     _lastData = _now;
     heartRate = data.heartRate;
-    if (data.rrIntervalsMs.isNotEmpty) latestRr = data.rrIntervalsMs.last;
+    previewRr.retainLatest(600);
+    previewRr.addAll(data.rrIntervalsMs);
+    for (final rr in data.rrIntervalsMs) {
+      _trend(rrTrend, data.timestamp, rr);
+    }
+    _trend(heartTrend, data.timestamp, data.heartRate.toDouble());
+    final previewMetric = previewRr.rmssd;
+    if (previewMetric != null) {
+      _trend(hrvTrend, data.timestamp, previewMetric);
+    }
+    if (!_recording) {
+      rmssd = previewMetric;
+    }
+    if (data.rrIntervalsMs.isNotEmpty) {
+      latestRr = data.rrIntervalsMs.last;
+    }
     connected = true;
     connectionStatus = 'Receiving data';
-    if (_firstData != null && !_firstData!.isCompleted) _firstData!.complete();
+    if (_firstData != null && !_firstData!.isCompleted) {
+      _firstData!.complete();
+    }
     if (_recording && sessionLogger != null) {
       if (_gap) {
         _event('measurement_recovered');
@@ -725,23 +939,25 @@ class SessionController extends ChangeNotifier {
       timeline.add(
         TimelinePoint(data.timestamp, data.heartRate, rmssd, _segment),
       );
-      _save(
-        sessionLogger!.logMeasurement(
-          polarId: polarId ?? sessionLogger!.polarId,
-          participantName: sessionLogger!.participantName,
-          heartRate: data.heartRate,
-          intervals: [
-            for (final sample in samples)
-              LoggedRr(
-                rrMs: sample.rrMs,
-                accepted: sample.accepted,
-                artifactReason: sample.artifactReason,
-              ),
-          ],
-          receivedAt: data.timestamp,
-          continuitySegment: _segment,
-        ),
-      );
+      if (preferences.records('heart')) {
+        _save(
+          sessionLogger!.logMeasurement(
+            polarId: polarId ?? sessionLogger!.polarId,
+            participantName: sessionLogger!.participantName,
+            heartRate: data.heartRate,
+            intervals: [
+              for (final sample in samples)
+                LoggedRr(
+                  rrMs: sample.rrMs,
+                  accepted: sample.accepted,
+                  artifactReason: sample.artifactReason,
+                ),
+            ],
+            receivedAt: data.timestamp,
+            continuitySegment: _segment,
+          ),
+        );
+      }
     }
     _changed();
   }
@@ -750,8 +966,12 @@ class SessionController extends ChangeNotifier {
     connected = false;
     connectionStatus = 'Disconnected';
     _event('bluetooth_disconnected');
-    if (sessionLogger != null) _break('Bluetooth disconnected');
-    if (_recording && !_manualDisconnect) _beginRecovery('disconnect');
+    if (sessionLogger != null) {
+      _break('Bluetooth disconnected');
+    }
+    if (_recording && !_manualDisconnect) {
+      _beginRecovery('disconnect');
+    }
     _changed();
   }
 
@@ -796,7 +1016,9 @@ class SessionController extends ChangeNotifier {
   }
 
   void reconnect() {
-    if (!canReconnect) return;
+    if (!canReconnect) {
+      return;
+    }
     _manualDisconnect = false;
     _exhausted = false;
     _beginRecovery('manual reconnect', manual: true);
@@ -834,13 +1056,19 @@ class SessionController extends ChangeNotifier {
         _changed();
         try {
           await polar.disconnect();
-          if (!_current(epoch)) return;
+          if (!_current(epoch)) {
+            return;
+          }
           _firstData = Completer<void>();
           await polar.connect(_target!);
-          if (!_current(epoch)) return;
+          if (!_current(epoch)) {
+            return;
+          }
           // A BLE link is not recovery: require an actual measurement.
           await _firstData!.future.timeout(staleAfter);
-          if (!_current(epoch)) return;
+          if (!_current(epoch)) {
+            return;
+          }
           if (!connected) {
             throw StateError('Disconnected before recovery completed');
           }
@@ -848,10 +1076,14 @@ class SessionController extends ChangeNotifier {
           _exhausted = false;
           return;
         } catch (failure) {
-          if (!_current(epoch)) return;
+          if (!_current(epoch)) {
+            return;
+          }
           _event('recovery_failed', description: 'attempt $attempt: $failure');
           await polar.disconnect();
-          if (!_current(epoch)) return;
+          if (!_current(epoch)) {
+            return;
+          }
           if (attempt < maxAttempts) {
             _retryWait = Completer<void>();
             _retryTimer = Timer(
@@ -880,8 +1112,12 @@ class SessionController extends ChangeNotifier {
   void _cancelRecovery() {
     _epoch++;
     _retryTimer?.cancel();
-    if (_retryWait != null && !_retryWait!.isCompleted) _retryWait!.complete();
-    if (_firstData != null && !_firstData!.isCompleted) _firstData!.complete();
+    if (_retryWait != null && !_retryWait!.isCompleted) {
+      _retryWait!.complete();
+    }
+    if (_firstData != null && !_firstData!.isCompleted) {
+      _firstData!.complete();
+    }
     _firstData = null;
     if (recovering) {
       _save(polar.disconnect());
@@ -892,7 +1128,9 @@ class SessionController extends ChangeNotifier {
   }
 
   void pause() {
-    if (!_recording || busy) return;
+    if (!_recording || busy) {
+      return;
+    }
     practice.pause();
     recordingState = RecordingState.paused;
     _cancelRecovery();
@@ -902,7 +1140,9 @@ class SessionController extends ChangeNotifier {
   }
 
   void resume() {
-    if (recordingState != RecordingState.paused || busy) return;
+    if (recordingState != RecordingState.paused || busy) {
+      return;
+    }
     _eegRecordingSince = DateTime.now().toUtc();
     _ecgRecordingSince = _eegRecordingSince;
     recordingState = RecordingState.recording;
@@ -927,7 +1167,9 @@ class SessionController extends ChangeNotifier {
     String note = '',
   }) async {
     final logger = sessionLogger;
-    if (logger == null || busy) return null;
+    if (logger == null || busy) {
+      return null;
+    }
     final marker = RecordedMarker(
       id: newMarkerId(),
       sessionId: logger.sessionId,
@@ -945,7 +1187,9 @@ class SessionController extends ChangeNotifier {
       flush: true,
     );
     // A slow write completing after a new session starts belongs to the old log.
-    if (_disposed || _visibleSessionId != logger.sessionId) return marker;
+    if (_disposed || _visibleSessionId != logger.sessionId) {
+      return marker;
+    }
     eventTimes.add(marker.timestamp);
     recordedMarkers.add(marker);
     _changed();
@@ -972,7 +1216,9 @@ class SessionController extends ChangeNotifier {
 
   Future<void> stop({String outcome = ''}) async {
     practice.stop();
-    if (busy || sessionLogger == null) return;
+    if (busy || sessionLogger == null) {
+      return;
+    }
     busy = true;
     recordingState = RecordingState.stopped;
     _cancelRecovery();
@@ -1005,14 +1251,18 @@ class SessionController extends ChangeNotifier {
 
   /// Explicit disconnection suppresses retries; the open session stays intact.
   Future<void> disconnect() async {
-    if (busy) return;
+    if (busy) {
+      return;
+    }
     _manualDisconnect = true;
     _cancelRecovery();
     connecting = false;
     connected = false;
     connectionStatus = status = 'Manually disconnected';
     _event('bluetooth_manual_disconnect');
-    if (sessionLogger != null) _break('manual disconnect');
+    if (sessionLogger != null) {
+      _break('manual disconnect');
+    }
     await polar.disconnect();
     _changed();
   }

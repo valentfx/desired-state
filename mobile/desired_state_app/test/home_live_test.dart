@@ -146,9 +146,9 @@ void main() {
       expect(find.byType(BottomSheet), findsNothing);
       await settleIo(
         tester,
-        () => find.byTooltip('Processing & plots').evaluate().isNotEmpty,
+        () => find.byTooltip('Live settings').evaluate().isNotEmpty,
       );
-      expect(find.byTooltip('Processing & plots'), findsOneWidget);
+      expect(find.byTooltip('Live settings'), findsOneWidget);
       await tester.runAsync(() => tester.tap(find.byTooltip('Session notes')));
       await settleIo(
         tester,

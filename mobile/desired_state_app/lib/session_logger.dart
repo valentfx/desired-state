@@ -27,6 +27,7 @@ class SessionLogger {
   Timer? _flushTimer;
   int _pendingRows = 0;
   bool _closed = false;
+  DateTime? stoppedAt;
 
   static Future<SessionLogger> start({
     required String polarId,
@@ -310,14 +311,18 @@ class SessionLogger {
         if (description != null && description.trim().isNotEmpty)
           'description': description.trim(),
       });
-      if (flush) await _flushSinks();
+      if (flush) {
+        await _flushSinks();
+      }
     });
   }
 
   /// Append-only annotations can be added after Stop without reopening raw sinks.
   Future<void> addMarkerNote(String eventId, String note) {
     final timestamp = DateTime.now().toUtc().toIso8601String();
-    if (note.trim().isEmpty) throw ArgumentError('Enter a note');
+    if (note.trim().isEmpty) {
+      throw ArgumentError('Enter a note');
+    }
     final row = {
       'schema_version': 1,
       'event': 'marker_note_added',
@@ -342,9 +347,14 @@ class SessionLogger {
     return operation;
   }
 
+  Future<void> flush() => _enqueue(_flushSinks);
+
   Future<void> close() async {
-    if (_closed) return;
+    if (_closed) {
+      return;
+    }
     _closed = true;
+    stoppedAt = DateTime.now().toUtc();
     _flushTimer?.cancel();
     await writeEvent('session_ended');
     await _writes;
@@ -395,7 +405,9 @@ class SessionLogger {
   }
 
   Future<void> _flushSinks() async {
-    if (_sinks.isEmpty || _pendingRows == 0) return;
+    if (_sinks.isEmpty || _pendingRows == 0) {
+      return;
+    }
     await Future.wait(_sinks.values.map((sink) => sink.flush()));
     _pendingRows = 0;
   }
