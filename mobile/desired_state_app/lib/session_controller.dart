@@ -7,6 +7,7 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 import 'polar_h10_service.dart';
 import 'h10_accelerometer.dart';
+import 'h10_ecg.dart';
 import 'o2_ring_service.dart';
 import 'device_models.dart';
 import 'recording_foreground_service.dart';
@@ -15,6 +16,10 @@ import 'session_logger.dart';
 import 'quick_markers.dart';
 import 'processing.dart';
 import 'muse_athena_service.dart';
+import 'session_history.dart';
+import 'participant_tools.dart';
+import 'practice_controller.dart';
+import 'eeg_bands.dart';
 
 enum RecordingState { stopped, recording, paused }
 
@@ -46,9 +51,28 @@ class SessionController extends ChangeNotifier {
        quickMarkers = QuickMarkerStore(directoryProvider: directoryProvider),
        processing = ProcessingStore(directoryProvider: directoryProvider),
        _foreground = foregroundService ?? RecordingForegroundService() {
+    practice = PracticeController(
+      onEvent: (event, values) =>
+          _event(event, description: jsonEncode(values)),
+    );
     assert(maxAttempts > 0 && staleAfter > Duration.zero);
     _ringReadingSubscription = ring.readings.listen(_onRingReading);
     museAthena.addListener(_onMuseChanged);
+    _museBatchSubscription = museAthena.batches.listen((batch) {
+      final logger = sessionLogger;
+      if (_recording && logger != null) {
+        recordedEegSamples += (batch['eegCount'] as num?)?.toInt() ?? 0;
+        _save(
+          logger.logMuseBatch({
+            ...batch,
+            'device_hint': museAthena.deviceHint,
+            'eeg_rate_hz': museAthena.eegRate,
+            'motion_rate_hz': museAthena.motionRate,
+            'recording_segment': _segment,
+          }),
+        );
+      }
+    });
     _ringPacketSubscription = ring.packets.listen((packet) {
       final logger = sessionLogger;
       if (_recording && logger != null && ringId != null) {
@@ -88,6 +112,59 @@ class SessionController extends ChangeNotifier {
       }
       _changed();
     });
+    _ecgSubscription = polar.ecgStream.listen((frame) {
+      if (_disposed) return;
+      final previous = _lastEcgTimestamp;
+      final duration = BigInt.from(
+        (frame.samples.length * 1000000000 / frame.sampleRate).round(),
+      );
+      if (previous == null ||
+          frame.sensorNanoseconds <= previous ||
+          frame.sensorNanoseconds - previous >
+              duration + BigInt.from(100000000)) {
+        _ecgSegment++;
+        ecgPreview.clear();
+      }
+      _lastEcgTimestamp = frame.sensorNanoseconds;
+      latestEcg = frame;
+      for (var i = 0; i < frame.samples.length; i++) {
+        final ns =
+            frame.sensorNanoseconds -
+            BigInt.from(
+              ((frame.samples.length - 1 - i) * 1000000000 / frame.sampleRate)
+                  .round(),
+            );
+        ecgPreview.add((ns, frame.samples[i].toDouble()));
+      }
+      while (ecgPreview.length > frame.sampleRate * 10) {
+        ecgPreview.removeAt(0);
+      }
+      final logger = sessionLogger;
+      final since = _ecgRecordingSince;
+      if (_recording &&
+          logger != null &&
+          polarId != null &&
+          since != null &&
+          frame.receivedAt.toUtc().difference(since).inMicroseconds >=
+              frame.samples.length * 1000000 / frame.sampleRate) {
+        recordedEcgSamples += frame.samples.length;
+        _save(
+          logger.logEcg(deviceId: polarId!, frame: frame, segment: _ecgSegment),
+        );
+      }
+      _changed();
+    });
+    _ecgStatusSubscription = polar.ecgStatusStream.listen((value) {
+      ecgStatus = value;
+      if (value == 'Not connected' || value == 'Disconnected') {
+        latestEcg = null;
+        _lastEcgTimestamp = null;
+        ecgPreview.clear();
+        _ecgSegment++;
+      }
+      _event('ecg_status', description: value);
+      _changed();
+    });
     _pmdSubscription = polar.pmdPackets.listen((packet) {
       final logger = sessionLogger;
       if (_recording && logger != null && polarId != null) {
@@ -113,6 +190,19 @@ class SessionController extends ChangeNotifier {
   late final StreamSubscription<H10Acceleration> _accSubscription;
   late final StreamSubscription<RawBlePacket> _pmdSubscription;
   late final StreamSubscription<String> _accStatusSubscription;
+  late final StreamSubscription<H10EcgFrame> _ecgSubscription;
+  late final StreamSubscription<String> _ecgStatusSubscription;
+  H10EcgFrame? latestEcg;
+  final List<(BigInt, double)> ecgPreview = [];
+  String ecgStatus = 'Not connected';
+  int recordedEcgSamples = 0, _ecgSegment = 0;
+  BigInt? _lastEcgTimestamp;
+  DateTime? _ecgRecordingSince;
+  bool get ecgFresh =>
+      connected &&
+      latestEcg != null &&
+      DateTime.now().difference(latestEcg!.receivedAt) <
+          const Duration(seconds: 3);
   H10Acceleration? latestAcceleration;
   String accelerationStatus = 'Not connected';
   int recordedAccSamples = 0;
@@ -136,7 +226,7 @@ class SessionController extends ChangeNotifier {
   bool _ringConnectInFlight = false;
   bool _ringManualDisconnect = false;
   bool get ringConnected => ringStatus == DeviceConnectionStatus.connected;
-  bool get canStart => !museAthena.streaming && (connected || ringDataFresh);
+  bool get canStart => connected || ringDataFresh || museAthena.fresh;
   Duration? get ringDataAge =>
       _lastRingData == null ? null : _now - _lastRingData!;
   bool get ringDataFresh =>
@@ -194,6 +284,7 @@ class SessionController extends ChangeNotifier {
     await ring.disconnect();
   }
 
+  late final PracticeController practice;
   final QuickMarkerStore quickMarkers;
   final ProcessingStore processing;
   final List<RrInput> analysisInputs = [];
@@ -270,7 +361,92 @@ class SessionController extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
-  void _onMuseChanged() => _changed();
+  late final StreamSubscription<Map<String, dynamic>> _museBatchSubscription;
+  int recordedEegSamples = 0;
+  bool _museWasStreaming = false;
+  DateTime? _lastRecordedBand;
+  DateTime? _eegRecordingSince;
+  String participantInfo = '';
+  String? participantId;
+  Future<void> editRecordingParticipant(
+    String name,
+    String info, {
+    String? profileId,
+  }) async {
+    final logger = sessionLogger;
+    if (logger == null || busy) throw StateError('No active session available');
+    busy = true;
+    _changed();
+    try {
+      // The owning controller is the only active-session annotation writer.
+      final store = ParticipantStore(directoryProvider: directoryProvider);
+      final profile = await store.resolve(name, info, id: profileId);
+      final repository = SessionHistoryRepository(
+        directoryProvider: directoryProvider,
+      );
+      await logger.writeEvent('participant_edit_requested', flush: true);
+      final entry = await repository.readEntry(logger.directory);
+      await repository.saveMetadata(
+        entry,
+        participantMetadata(
+          entry.metadata,
+          name,
+          info,
+          participantId: profile.id,
+        ),
+      );
+      participant = name.trim().isEmpty ? 'unassigned' : name.trim();
+      participantInfo = info.trim();
+      participantId = profile.id;
+      await logger.writeEvent(
+        'participant_label_corrected',
+        description: jsonEncode({
+          'display_name': participant,
+          'participant_id': participantId,
+          'scope': 'whole_session',
+          'original_name': logger.participantName,
+        }),
+        flush: true,
+      );
+    } finally {
+      busy = false;
+      _changed();
+    }
+  }
+
+  void _onMuseChanged() {
+    final frame = museAthena.latestBands;
+    final logger = sessionLogger;
+    if (_recording &&
+        logger != null &&
+        frame != null &&
+        frame.time != _lastRecordedBand &&
+        _eegRecordingSince != null &&
+        museAthena.eegRate > 0 &&
+        frame.time.difference(_eegRecordingSince!).inMilliseconds >=
+            1024 * 1000 / museAthena.eegRate) {
+      _lastRecordedBand = frame.time;
+      _save(
+        logger.logEegBands({
+          'received_utc': frame.time.toIso8601String(),
+          'channels': frame.channels,
+          'usable_channels': frame.channels.length,
+          'total_channels': frame.channelCount,
+          'sample_rate_hz': museAthena.eegRate,
+          'continuity_segment': museAthena.continuity,
+          'recording_segment': _segment,
+        }),
+      );
+    }
+    if (museAthena.streaming != _museWasStreaming) {
+      _museWasStreaming = museAthena.streaming;
+      _event(
+        _museWasStreaming ? 'muse_connected' : 'muse_disconnected',
+        description: museAthena.deviceHint,
+      );
+    }
+    _changed();
+  }
 
   void _save(Future<void> operation) {
     unawaited(
@@ -323,6 +499,7 @@ class SessionController extends ChangeNotifier {
 
   Future<void> start({
     required String participantName,
+    String? participantProfileId,
     String description = '',
   }) async {
     if (!canStart || sessionLogger != null || busy) return;
@@ -333,24 +510,51 @@ class SessionController extends ChangeNotifier {
       participant = participantName.trim().isEmpty
           ? 'unassigned'
           : participantName.trim();
+      if (participant != 'unassigned') {
+        final profile = await ParticipantStore(
+          directoryProvider: directoryProvider,
+        ).resolve(participant, participantInfo, id: participantProfileId);
+        participantId = profile.id;
+        participant = profile.name;
+        participantInfo = profile.info;
+      } else {
+        participantId = null;
+        participantInfo = '';
+      }
       await processing.load();
       opened = await SessionLogger.start(
         polarId: connected && polarId != null
             ? polarId!
-            : 'O2RING_${ringId!.replaceAll(RegExp(r'[^A-Za-z0-9]'), '')}',
-        deviceName: connected ? deviceName : ringName,
-        primaryDeviceKind: connected ? 'polar_h10' : 'wellue_o2ring',
-        additionalDevices: ringId == null
-            ? null
-            : {
-                ringId!: {
-                  'name': ringName,
-                  'kind': 'wellue_o2ring',
-                  'ble_id': ringId,
-                  'decoder_version': 'viatom-legacy-live-13-v1',
-                },
-              },
+            : ringDataFresh
+            ? 'O2RING_${ringId!.replaceAll(RegExp(r'[^A-Za-z0-9]'), '')}'
+            : 'MUSE_ATHENA',
+        deviceName: connected
+            ? deviceName
+            : ringDataFresh
+            ? ringName
+            : 'Muse S Athena',
+        primaryDeviceKind: connected
+            ? 'polar_h10'
+            : ringDataFresh
+            ? 'wellue_o2ring'
+            : 'muse_s_athena',
+        additionalDevices: {
+          ?polarId: {'name': deviceName, 'kind': 'polar_h10'},
+          'MUSE_ATHENA': {
+            'name': museAthena.deviceHint,
+            'kind': 'muse_s_athena',
+            'backend': 'brainflow_p21',
+            'connected_at_start': museAthena.streaming,
+          },
+          ?ringId: {
+            'name': ringName,
+            'kind': 'wellue_o2ring',
+            'ble_id': ringId,
+            'decoder_version': 'viatom-legacy-live-13-v1',
+          },
+        },
         participantName: participant,
+        participantId: participantId,
         description: description,
         directoryProvider: directoryProvider,
       );
@@ -367,13 +571,54 @@ class SessionController extends ChangeNotifier {
         ),
         flush: true,
       );
+      if (museAthena.baseline != null) {
+        await opened.writeEvent(
+          'eeg_baseline_at_session_start',
+          description: jsonEncode({
+            'selected_utc': museAthena.baseline!.time.toIso8601String(),
+            'channels': museAthena.baseline!.channels,
+            'units': 'microvolt_squared',
+          }),
+        );
+      }
+      await opened.writeEvent(
+        'eeg_processing_initial',
+        description: jsonEncode({
+          'version': 1,
+          'method': 'hann_periodogram_1_30hz_v1',
+          'bands_hz': {
+            for (final e in eegBands.entries) e.key: [e.value.$1, e.value.$2],
+          },
+          'minimum_window_seconds': 2,
+          'maximum_samples': 1024,
+          'maximum_centered_microvolt': 250,
+          'maximum_step_microvolt': 150,
+          'minimum_variance': 0.01,
+          'validated_relaxation_score': false,
+        }),
+      );
+      await opened.writeEvent(
+        'practice_state_at_session_start',
+        description: jsonEncode(practice.settings),
+      );
       await _foreground.start(opened.sessionId);
       if (_disposed) {
         await opened.close();
         await _stopForeground();
         return;
       }
+      _eegRecordingSince = DateTime.now().toUtc();
+      _ecgRecordingSince = _eegRecordingSince;
+      _lastRecordedBand = museAthena.latestBands?.time;
+      recordedEegSamples = 0;
       recordedAccSamples = 0;
+      recordedEcgSamples = 0;
+      _ecgSegment++;
+      _ecgRecordingSince = DateTime.now().toUtc();
+      await opened.writeEvent(
+        'ecg_configuration_initial',
+        description: ecgStatus,
+      );
       _accSegment++;
       await opened.writeEvent(
         'accelerometer_configuration_initial',
@@ -409,6 +654,7 @@ class SessionController extends ChangeNotifier {
   }
 
   void _break(String reason) {
+    _ecgSegment++;
     _accSegment++;
     if (_gap) return;
     _gap = true;
@@ -454,7 +700,7 @@ class SessionController extends ChangeNotifier {
       );
       _save(
         sessionLogger!.logMeasurement(
-          polarId: sessionLogger!.polarId,
+          polarId: polarId ?? sessionLogger!.polarId,
           participantName: sessionLogger!.participantName,
           heartRate: data.heartRate,
           intervals: [
@@ -620,6 +866,7 @@ class SessionController extends ChangeNotifier {
 
   void pause() {
     if (!_recording || busy) return;
+    practice.pause();
     recordingState = RecordingState.paused;
     _cancelRecovery();
     _event('session_paused');
@@ -629,11 +876,15 @@ class SessionController extends ChangeNotifier {
 
   void resume() {
     if (recordingState != RecordingState.paused || busy) return;
+    _eegRecordingSince = DateTime.now().toUtc();
+    _ecgRecordingSince = _eegRecordingSince;
     recordingState = RecordingState.recording;
     _event('session_resumed');
     _exhausted = false;
     _waitingSince = _now;
-    if (!connected && !_manualDisconnect) _beginRecovery('resume');
+    if (!connected && _target != null && !_manualDisconnect) {
+      _beginRecovery('resume');
+    }
     _changed();
   }
 
@@ -693,6 +944,7 @@ class SessionController extends ChangeNotifier {
   }
 
   Future<void> stop({String outcome = ''}) async {
+    practice.stop();
     if (busy || sessionLogger == null) return;
     busy = true;
     recordingState = RecordingState.stopped;
@@ -741,7 +993,9 @@ class SessionController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    practice.dispose();
     quickMarkers.dispose();
+    unawaited(_museBatchSubscription.cancel());
     museAthena.removeListener(_onMuseChanged);
     museAthena.dispose();
     _timer.cancel();
@@ -750,6 +1004,8 @@ class SessionController extends ChangeNotifier {
     unawaited(_ringPacketSubscription.cancel());
     unawaited(_ringStatusSubscription.cancel());
     unawaited(ring.dispose());
+    unawaited(_ecgSubscription.cancel());
+    unawaited(_ecgStatusSubscription.cancel());
     unawaited(_accSubscription.cancel());
     unawaited(_pmdSubscription.cancel());
     unawaited(_accStatusSubscription.cancel());

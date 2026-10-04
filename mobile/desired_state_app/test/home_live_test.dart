@@ -114,7 +114,7 @@ void main() {
         tester,
         () => find.textContaining('Original intention').evaluate().isNotEmpty,
       );
-      expect(find.text('History'), findsOneWidget);
+      expect(find.text('Analyze'), findsOneWidget);
       expect(controller.sessionLogger, isNull);
       await openScreen(tester, 'Live');
       await tester.pumpAndSettle();
@@ -122,7 +122,19 @@ void main() {
         find.widgetWithText(TextField, 'Participant name'),
         'Live tester',
       );
-      await tester.ensureVisible(find.text('START RECORDING'));
+      // The connect list builds children lazily; scroll to construct Start.
+      await tester.scrollUntilVisible(
+        find.text('START RECORDING'),
+        180,
+        scrollable: find
+            .descendant(
+              of: find.byType(CollectorScreen),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
+      await tester.pump();
+      expect(find.text('START RECORDING').hitTestable(), findsOneWidget);
       await tester.runAsync(() => tester.tap(find.text('START RECORDING')));
       await settleIo(
         tester,
@@ -132,7 +144,11 @@ void main() {
       );
       final logger = controller.sessionLogger!;
       expect(find.byType(BottomSheet), findsNothing);
-      expect(find.textContaining('Filters & metrics'), findsOneWidget);
+      await settleIo(
+        tester,
+        () => find.byTooltip('Processing & plots').evaluate().isNotEmpty,
+      );
+      expect(find.byTooltip('Processing & plots'), findsOneWidget);
       await tester.runAsync(() => tester.tap(find.byTooltip('Session notes')));
       await settleIo(
         tester,
@@ -244,13 +260,15 @@ void main() {
       );
       await settleIo(
         tester,
-        () => find.textContaining('Original intention').evaluate().length == 2,
+        () => find.textContaining('2 sessions').evaluate().isNotEmpty,
       );
-      await tester.tap(find.text('Filter by user, ID, date'));
+      await tester.tap(find.text('Filter by participant, ID, date'));
       await tester.pumpAndSettle();
       await tester.tap(find.byType(DropdownButton<String>));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Fixture person').last);
+      await tester.tap(
+        find.text('Legacy / unassigned ID: Fixture person').last,
+      );
       await tester.pumpAndSettle();
       expect(find.textContaining('Original intention'), findsOneWidget);
       await tester.enterText(
@@ -261,7 +279,7 @@ void main() {
       expect(find.text('No saved sessions found.'), findsOneWidget);
       await tester.tap(find.text('Clear filters'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('Original intention'), findsNWidgets(2));
+      expect(find.textContaining('2 sessions'), findsOneWidget);
       await tester.tap(find.text('Date range'));
       await tester.pumpAndSettle();
       expect(find.byType(DateRangePickerDialog), findsOneWidget);

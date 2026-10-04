@@ -20,10 +20,11 @@ void main() {
       await tester.pump();
       expect(find.text('Desired State'), findsOneWidget);
       expect(find.text('Scan for devices'), findsNothing);
-      await tester.tap(find.text('Connect H10'));
+      await tester.tap(find.text('Connect devices'));
       await tester.pumpAndSettle();
       expect(find.text('Devices'), findsOneWidget);
-      expect(find.text('Scan for devices'), findsOneWidget);
+      expect(find.text('Scan for Polar H10'), findsOneWidget);
+      expect(find.text('Scan for O2Ring'), findsOneWidget);
       expect(find.text('START RECORDING'), findsNothing);
       await tester.pumpWidget(const SizedBox());
     },

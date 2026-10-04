@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'eeg_bands.dart';
+
 /// App-owned Android bridge to BrainFlow's hardware-tested Muse S Athena path.
 /// This first slice exposes EEG and motion diagnostics; session-file recording
 /// is deliberately added only after the phone stream is confirmed.
@@ -16,6 +18,31 @@ class MuseAthenaService extends ChangeNotifier {
   final MethodChannel _methods;
   final EventChannel _events;
   StreamSubscription<dynamic>? _subscription;
+  final _batches = StreamController<Map<String, dynamic>>.broadcast(sync: true);
+  Stream<Map<String, dynamic>> get batches => _batches.stream;
+  final List<EegBandFrame> bandHistory = [];
+  DateTime? lastSamplesAt;
+  DateTime? _lastBandAt;
+  int continuity = 0;
+  EegBandFrame? baseline;
+  int? baselineContinuity;
+  void setBaseline(EegBandFrame frame) {
+    baseline = frame;
+    baselineContinuity = continuity;
+    _notify();
+  }
+
+  EegBandFrame? get latestBands =>
+      bandHistory.isEmpty ? null : bandHistory.last;
+  bool get fresh =>
+      streaming &&
+      lastSamplesAt != null &&
+      DateTime.now().difference(lastSamplesAt!) < const Duration(seconds: 3);
+  bool _disposed = false;
+  void _notify() {
+    if (!_disposed) notifyListeners();
+  }
+
   bool streaming = false;
   bool busy = false;
   String status = 'Not connected';
@@ -39,14 +66,14 @@ class MuseAthenaService extends ChangeNotifier {
     busy = true;
     status = 'Connecting and starting Athena stream…';
     _clearSamples();
-    notifyListeners();
+    _notify();
     try {
       _subscription ??= _events.receiveBroadcastStream().listen(
         _onEvent,
         onError: (Object error) {
           status = 'Athena stream error: $error';
           streaming = false;
-          notifyListeners();
+          _notify();
         },
       );
       final result = await _methods.invokeMapMethod<String, dynamic>(
@@ -67,7 +94,7 @@ class MuseAthenaService extends ChangeNotifier {
       status = 'Athena start failed: $error';
     } finally {
       busy = false;
-      notifyListeners();
+      _notify();
     }
   }
 
@@ -75,7 +102,7 @@ class MuseAthenaService extends ChangeNotifier {
     if (busy) return;
     busy = true;
     status = 'Stopping Athena stream…';
-    notifyListeners();
+    _notify();
     try {
       await _methods.invokeMethod<void>('stop');
       streaming = false;
@@ -84,24 +111,39 @@ class MuseAthenaService extends ChangeNotifier {
       status = 'Athena stop error: $error';
     } finally {
       busy = false;
-      notifyListeners();
+      _notify();
     }
   }
 
   void reportStatus(String value) {
     status = value;
-    notifyListeners();
+    _notify();
   }
 
   void _onEvent(dynamic event) {
-    if (event is! Map) return;
+    if (_disposed || event is! Map) return;
     final map = Map<Object?, Object?>.from(event);
     if (map['type'] == 'status') {
       status = map['message']?.toString() ?? status;
       if (status.startsWith('Athena stream read failed:')) streaming = false;
-      notifyListeners();
+      _notify();
       return;
     }
+    final now = DateTime.now().toUtc();
+    final previous = lastSamplesAt;
+    if (previous != null &&
+        now.difference(previous) > const Duration(seconds: 2)) {
+      continuity++;
+      eegHistory.clear();
+      accelHistory.clear();
+      gyroHistory.clear();
+    }
+    if (((map['eegCount'] as num?)?.toInt() ?? 0) > 0) lastSamplesAt = now;
+    _batches.add({
+      ...Map<String, dynamic>.from(event),
+      'received_utc': now.toIso8601String(),
+      'continuity_segment': continuity,
+    });
     _appendRows(map['eeg'], eegHistory, latestEeg, 'EEG');
     _appendRows(map['accel'], accelHistory, latestAccel, 'ACC');
     _appendRows(map['gyro'], gyroHistory, latestGyro, 'GYRO');
@@ -117,10 +159,21 @@ class MuseAthenaService extends ChangeNotifier {
         motionTimes.last is num) {
       latestMotionTimestamp = (motionTimes.last as num).toDouble();
     }
+    if (_lastBandAt == null ||
+        now.difference(_lastBandAt!) >= const Duration(seconds: 1)) {
+      _lastBandAt = now;
+      final powers = <String, Map<String, double>>{};
+      for (final channel in eegHistory.entries) {
+        final power = eegBandPower(channel.value, eegRate);
+        if (power != null) powers[channel.key] = power;
+      }
+      bandHistory.add(EegBandFrame(now, powers, eegHistory.length));
+      if (bandHistory.length > 900) bandHistory.removeAt(0);
+    }
     if (eegSamples > 0 || motionSamples > 0) {
       status = 'Receiving live EEG and motion';
     }
-    notifyListeners();
+    _notify();
   }
 
   void _appendRows(
@@ -149,6 +202,12 @@ class MuseAthenaService extends ChangeNotifier {
   }
 
   void _clearSamples() {
+    continuity++;
+    baseline = null;
+    baselineContinuity = null;
+    _lastBandAt = null;
+    lastSamplesAt = null;
+    bandHistory.clear();
     eegSamples = motionSamples = 0;
     latestEegTimestamp = latestMotionTimestamp = null;
     eegHistory.clear();
@@ -161,11 +220,13 @@ class MuseAthenaService extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     final subscription = _subscription;
     if (subscription != null) {
       unawaited(subscription.cancel());
       unawaited(_methods.invokeMethod<void>('stop').catchError((Object _) {}));
     }
+    unawaited(_batches.close());
     super.dispose();
   }
 }

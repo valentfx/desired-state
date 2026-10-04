@@ -279,7 +279,6 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            ...widget.header,
             Row(
               children: [
                 Expanded(
@@ -408,17 +407,47 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
           ],
         ),
       );
-      return LayoutBuilder(
-        builder: (context, constraints) {
-          // Normal portrait layout fits; small/landscape/large text keeps controls reachable.
-          final minimum =
-              560.0 +
-              (summaries.length - 2).clamp(0, 99) * 24 +
-              (MediaQuery.textScalerOf(context).scale(14) - 14) * 12;
-          return constraints.maxHeight >= minimum
-              ? panel(constraints.maxHeight)
-              : SingleChildScrollView(child: panel(minimum));
-        },
+      return ListView(
+        padding: const EdgeInsets.all(8),
+        children: [
+          ...widget.header,
+          panel(
+            400.0 +
+                (summaries.length - 2).clamp(0, 99) * 24 +
+                (MediaQuery.textScalerOf(context).scale(14) - 14) * 12,
+          ),
+          ExpansionTile(
+            title: const Text('BPM & HRV details'),
+            subtitle: const Text(
+              'Native units · numeric axes · visible min/max',
+            ),
+            children: [
+              for (final entry in series.entries)
+                HistoryPlot(
+                  title: entry.key == 'HR' ? 'Heart rate' : entry.key,
+                  unit: _unit(entry.key),
+                  points: entry.value,
+                  start: start,
+                  end: end,
+                  events: events,
+                  color: _color(entry.key),
+                  cursor: _overlayCursor,
+                  onInspect: (point) => setState(() {
+                    _overlayCursor = point.time;
+                    _follow = false;
+                    _left = start;
+                    _right = end;
+                  }),
+                ),
+              const Padding(
+                padding: EdgeInsets.all(12),
+                child: Text(
+                  'Select HRV values in Filters & metrics. Open H10 ECG waveform in Live for the acquired ECG.',
+                ),
+              ),
+            ],
+          ),
+        ],
       );
     }
     final content = SafeArea(

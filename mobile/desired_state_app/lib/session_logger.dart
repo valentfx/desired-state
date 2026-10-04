@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'session_archive.dart';
 import 'device_models.dart';
 import 'h10_accelerometer.dart';
+import 'h10_ecg.dart';
 
 class SessionLogger {
   SessionLogger._(
@@ -32,6 +33,7 @@ class SessionLogger {
     required String deviceName,
     required String participantName,
     String description = '',
+    String? participantId,
     Future<Directory> Function()? directoryProvider,
     DateTime? startedAt,
     Map<String, dynamic>? additionalDevices,
@@ -56,6 +58,7 @@ class SessionLogger {
       'schema_version': 1,
       'session_id': id,
       'source': 'desired_state_flutter',
+      'participant_id': ?participantId,
       'description': description.trim(),
       'rr_processing': 'mobile-median9-25pct-300-2000-v1',
       'continuity_version': 1,
@@ -65,6 +68,8 @@ class SessionLogger {
         for (final id in (additionalDevices ?? {}).keys) id: participantName,
       },
       'auxiliary_streams_version': 1,
+      'h10_ecg_stream_version': 1,
+      'h10_ecg_units': 'microvolt',
       'h10_accelerometer_stream_version': 1,
       'h10_accelerometer_units': 'milli_g',
       'timestamp_provenance': 'host_receipt_utc',
@@ -124,6 +129,20 @@ class SessionLogger {
       }
     });
   }
+
+  Future<void> logEcg({
+    required String deviceId,
+    required H10EcgFrame frame,
+    required int segment,
+  }) => _enqueue(
+    () => _appendJsonl('h10_ecg', {
+      ...frame.toJson(),
+      'session_id': sessionId,
+      'polar_id': deviceId,
+      'user_id': participantName,
+      'continuity_segment': segment,
+    }),
+  );
 
   Future<void> logAcceleration({
     required String deviceId,
@@ -199,6 +218,31 @@ class SessionLogger {
       'characteristic': packet.characteristic,
       'bytes': packet.bytes,
       'hex': packet.hex,
+    }),
+  );
+
+  Future<void> logMuseBatch(Map<String, dynamic> batch) => _enqueue(
+    () => _appendJsonl('muse_eeg', {
+      'schema_version': 1,
+      'session_id': sessionId,
+      'user_id': participantName,
+      'device_id': 'MUSE_ATHENA',
+      'sensor_kind': 'muse_s_athena',
+      'timestamp_provenance': 'brainflow_timestamps_and_host_receipt_utc',
+      'eeg_units': 'microvolt',
+      ...batch,
+    }),
+  );
+
+  Future<void> logEegBands(Map<String, dynamic> frame) => _enqueue(
+    () => _appendJsonl('muse_bands', {
+      ...frame,
+      'schema_version': 1,
+      'session_id': sessionId,
+      'user_id': participantName,
+      'device_id': 'MUSE_ATHENA',
+      'units': 'microvolt_squared',
+      'method': 'hann_periodogram_1_30hz_v1',
     }),
   );
 
@@ -300,7 +344,10 @@ class SessionLogger {
       'o2ring_measurements',
       'o2ring_raw',
       'h10_accelerometer',
+      'h10_ecg',
       'h10_pmd_raw',
+      'muse_eeg',
+      'muse_bands',
     ]) {
       _sinks[stream] = File(
         '${directory.path}${Platform.pathSeparator}$stream.jsonl',

@@ -5,6 +5,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'session_controller.dart';
 import 'o2_ring_service.dart';
 import 'o2_ring_diagnostics_screen.dart';
+import 'eeg_live_panel.dart';
 
 /// Device discovery lives here; acquisition remains owned by SessionController.
 class DeviceScreen extends StatefulWidget {
@@ -16,7 +17,8 @@ class DeviceScreen extends StatefulWidget {
 
 class _DeviceScreenState extends State<DeviceScreen> {
   SessionController get _controller => widget.controller;
-  List<ScanResult> _scanResults = [];
+  final Map<String, List<ScanResult>> _results = {};
+  String _scanKind = 'h10';
   bool _scanning = false;
   String? _scanStatus;
   final TextEditingController _athenaSerial = TextEditingController();
@@ -55,7 +57,7 @@ class _DeviceScreenState extends State<DeviceScreen> {
                 style: Theme.of(context).textTheme.titleLarge,
               ),
               const Text(
-                'BrainFlow Android stream · EEG and motion diagnostics. This test stream is not yet saved in session recordings.',
+                'EEG and motion · included when recording. Detailed diagnostics below.',
               ),
               const SizedBox(height: 8),
               TextField(
@@ -77,8 +79,7 @@ class _DeviceScreenState extends State<DeviceScreen> {
                             muse.streaming ||
                             _scanning ||
                             _controller.connecting ||
-                            _controller.busy ||
-                            _controller.sessionLogger != null
+                            _controller.busy
                         ? null
                         : _connectAthena,
                     icon: Icon(
@@ -98,38 +99,45 @@ class _DeviceScreenState extends State<DeviceScreen> {
               ),
               const SizedBox(height: 8),
               Text(muse.status),
-              if (muse.streaming || muse.eegSamples > 0) ...[
-                Text(
-                  '${muse.deviceHint} · EEG ${muse.eegRate} Hz (${muse.eegSamples} samples) · motion ${muse.motionRate} Hz (${muse.motionSamples} samples)',
-                ),
-                if (muse.latestEeg.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  const Text(
-                    'EEG latest values (µV by BrainFlow channel order)',
-                  ),
-                  for (final entry in muse.latestEeg.entries)
-                    Text('${entry.key}: ${entry.value.toStringAsFixed(2)}'),
-                ],
-                if (muse.eegHistory.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  const Text('EEG · relative channel traces'),
-                  SizedBox(
-                    height: 150,
-                    width: double.infinity,
-                    child: CustomPaint(
-                      painter: _MuseEegPainter(muse.eegHistory),
+              if (muse.streaming || muse.eegSamples > 0)
+                ExpansionTile(
+                  title: const Text('Athena diagnostics'),
+                  children: [
+                    Text(
+                      '${muse.deviceHint} · EEG ${muse.eegRate} Hz (${muse.eegSamples} samples) · motion ${muse.motionRate} Hz (${muse.motionSamples} samples)',
                     ),
-                  ),
-                ],
-                if (muse.latestAccel.isNotEmpty)
-                  Text(
-                    'Motion latest · ${muse.latestAccel.entries.map((e) => '${e.key} ${e.value.toStringAsFixed(3)}').join(' · ')}',
-                  ),
-                if (muse.latestGyro.isNotEmpty)
-                  Text(
-                    'Gyroscope latest · ${muse.latestGyro.entries.map((e) => '${e.key} ${e.value.toStringAsFixed(3)}').join(' · ')}',
-                  ),
-              ],
+                    if (muse.latestEeg.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      const Text(
+                        'EEG latest values (µV by BrainFlow channel order)',
+                      ),
+                      for (final entry in muse.latestEeg.entries)
+                        Text('${entry.key}: ${entry.value.toStringAsFixed(2)}'),
+                    ],
+                    if (muse.eegHistory.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      const Text('Raw EEG · shared zero and µV scale'),
+                      SizedBox(
+                        height: 150,
+                        width: double.infinity,
+                        child: CustomPaint(
+                          painter: _MuseEegPainter(
+                            muse.eegHistory,
+                            muse.eegRate,
+                          ),
+                        ),
+                      ),
+                    ],
+                    if (muse.latestAccel.isNotEmpty)
+                      Text(
+                        'Motion latest · ${muse.latestAccel.entries.map((e) => '${e.key} ${e.value.toStringAsFixed(3)}').join(' · ')}',
+                      ),
+                    if (muse.latestGyro.isNotEmpty)
+                      Text(
+                        'Gyroscope latest · ${muse.latestGyro.entries.map((e) => '${e.key} ${e.value.toStringAsFixed(3)}').join(' · ')}',
+                      ),
+                  ],
+                ),
             ],
           );
         },
@@ -149,12 +157,15 @@ class _DeviceScreenState extends State<DeviceScreen> {
     return scanOk && connectOk;
   }
 
-  Future<void> _scan() async {
+  Future<void> _scan(String kind) async {
     if (_scanning) return;
     setState(() {
       _scanning = true;
-      _scanResults = [];
-      _scanStatus = 'Scanning for Polar H10 and O2Ring...';
+      _scanKind = kind;
+      _results[kind] = [];
+      _scanStatus = kind == 'h10'
+          ? 'Scanning for Polar H10...'
+          : 'Scanning for O2Ring...';
     });
 
     try {
@@ -164,12 +175,12 @@ class _DeviceScreenState extends State<DeviceScreen> {
         setState(() => _scanStatus = 'Bluetooth permission denied');
         return;
       }
-      final results = await _scanAll();
+      final results = await _scanOne(kind);
 
       if (!mounted) return;
 
       setState(() {
-        _scanResults = results;
+        _results[kind] = results;
         _scanStatus = results.isEmpty
             ? 'No supported device found'
             : 'Found ${results.length} device(s)';
@@ -189,24 +200,65 @@ class _DeviceScreenState extends State<DeviceScreen> {
     }
   }
 
-  Future<List<ScanResult>> _scanAll() async {
-    // The adapter scans are serialized because FlutterBlue owns one scanner.
-    // A broad O2Ring scan is run first; the existing H10 service then performs
-    // its service-filtered discovery without changing H10 connection behavior.
+  Future<List<ScanResult>> _scanOne(String kind) async {
+    if (kind == 'h10') return _controller.polar.scan();
     final adapter = O2RingService();
-    final ring = await adapter.scan();
-    await adapter.dispose();
-    final h10 = await _controller.polar.scan();
-    final seen = <String>{};
-    return [
-      ...ring,
-      ...h10,
-    ].where((result) => seen.add(result.device.remoteId.str)).toList();
+    try {
+      return await adapter.scan();
+    } finally {
+      await adapter.dispose();
+    }
   }
 
-  Future<void> _connect(ScanResult result) async {
+  Widget _scanControls(String kind) => Column(
+    children: [
+      FilledButton.icon(
+        onPressed:
+            _scanning ||
+                _controller.connecting ||
+                _controller.busy ||
+                _controller.museAthena.busy
+            ? null
+            : () => _scan(kind),
+        icon: const Icon(Icons.bluetooth_searching),
+        label: Text(
+          _scanning && _scanKind == kind
+              ? 'Searching...'
+              : kind == 'h10'
+              ? 'Scan for Polar H10'
+              : 'Scan for O2Ring',
+        ),
+      ),
+      if (_scanKind == kind && _scanStatus != null) Text(_scanStatus!),
+      for (final result in _results[kind] ?? <ScanResult>[])
+        ListTile(
+          title: Text(
+            result.device.platformName.isEmpty
+                ? (kind == 'h10' ? 'Polar H10' : 'O2Ring')
+                : result.device.platformName,
+          ),
+          subtitle: Text(result.device.remoteId.str),
+          trailing: const Icon(Icons.bluetooth_connected),
+          onTap: _controller.connecting || _controller.busy
+              ? null
+              : () async {
+                  try {
+                    await _connect(result, kind);
+                  } catch (error) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Connection failed: $error')),
+                      );
+                    }
+                  }
+                },
+        ),
+    ],
+  );
+
+  Future<void> _connect(ScanResult result, String kind) async {
     _scanStatus = null;
-    if (O2RingService.isCandidate(result)) {
+    if (kind == 'ring') {
       if (!mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
@@ -230,74 +282,87 @@ class _DeviceScreenState extends State<DeviceScreen> {
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Polar H10',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    Text(_controller.deviceName),
+                    Text(_controller.error ?? _controller.connectionStatus),
+                    if (_controller.polarId != null) ...[
+                      Text('H10 ACC: ${_controller.accelerationStatus}'),
+                      Text('H10 ECG: ${_controller.ecgStatus}'),
+                    ],
+                    if (_controller.canReconnect)
+                      FilledButton.icon(
+                        onPressed: _controller.reconnect,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Reconnect H10'),
+                      ),
+                    if (_controller.connected || _controller.polarId != null)
+                      TextButton(
+                        onPressed: _controller.busy ? null : _disconnect,
+                        child: const Text('Disconnect H10'),
+                      ),
+                    if (_controller.sessionLogger == null) _scanControls('h10'),
+                    if (_controller.sessionLogger != null)
+                      const Text(
+                        'Reconnect keeps this session. Stop before selecting a different H10.',
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'O2Ring',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    Text(
+                      '${_controller.ringName} · ${_controller.ringStatus.name}',
+                    ),
+                    Text(
+                      'O2Ring rows recorded: ${_controller.recordedRingReadings}',
+                    ),
+                    if (_controller.ringDevice != null)
+                      Wrap(
+                        spacing: 8,
+                        children: [
+                          OutlinedButton.icon(
+                            onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => O2RingDiagnosticsScreen(
+                                  controller: _controller,
+                                ),
+                              ),
+                            ),
+                            icon: const Icon(Icons.sensors),
+                            label: const Text('O2Ring diagnostics'),
+                          ),
+                          TextButton(
+                            onPressed: _controller.disconnectRing,
+                            child: const Text('Disconnect O2Ring'),
+                          ),
+                        ],
+                      ),
+                    if (_controller.sessionLogger == null)
+                      _scanControls('ring'),
+                  ],
+                ),
+              ),
+            ),
             if (Theme.of(context).platform == TargetPlatform.android)
               _athenaCard(),
-            if (_controller.ringDevice != null) ...[
-              Text('${_controller.ringName} · ${_controller.ringStatus.name}'),
-              Text('O2Ring rows recorded: ${_controller.recordedRingReadings}'),
-              OutlinedButton.icon(
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) =>
-                        O2RingDiagnosticsScreen(controller: _controller),
-                  ),
-                ),
-                icon: const Icon(Icons.sensors),
-                label: const Text('O2Ring diagnostics'),
-              ),
-            ],
-            Text(_controller.deviceName),
-            Text(_controller.error ?? _controller.connectionStatus),
-            if (_controller.polarId != null)
-              Text('H10 ACC: ${_controller.accelerationStatus}'),
-            if (_scanStatus != null) Text(_scanStatus!),
-            if (_controller.sessionLogger != null)
-              const Text(
-                'This recording keeps its assigned strap. Reconnect preserves the session; stop before selecting another device.',
-              ),
-            if (_controller.canReconnect)
-              FilledButton.icon(
-                onPressed: _controller.reconnect,
-                icon: const Icon(Icons.refresh),
-                label: const Text('Reconnect H10'),
-              ),
-            if (_controller.connected || _controller.sessionLogger != null)
-              TextButton(
-                onPressed: _controller.busy ? null : _disconnect,
-                child: const Text('Disconnect'),
-              ),
-            if (_controller.sessionLogger == null) ...[
-              FilledButton.icon(
-                onPressed:
-                    _scanning ||
-                        _controller.connecting ||
-                        _controller.busy ||
-                        _controller.museAthena.streaming ||
-                        _controller.museAthena.busy
-                    ? null
-                    : _scan,
-                icon: const Icon(Icons.bluetooth_searching),
-                label: Text(_scanning ? 'Searching...' : 'Scan for devices'),
-              ),
-              for (final result in _scanResults)
-                ListTile(
-                  title: Text(
-                    result.device.platformName.isEmpty
-                        ? (O2RingService.isCandidate(result)
-                              ? 'Viatom / Wellue O2Ring candidate'
-                              : 'Polar H10')
-                        : result.device.platformName,
-                  ),
-                  subtitle: Text(
-                    O2RingService.isCandidate(result)
-                        ? '${result.device.remoteId.str} · Open diagnostics'
-                        : result.device.remoteId.str,
-                  ),
-                  onTap: _controller.connecting || _controller.busy
-                      ? null
-                      : () => _connect(result),
-                ),
-            ],
           ],
         ),
       ),
@@ -306,65 +371,42 @@ class _DeviceScreenState extends State<DeviceScreen> {
 }
 
 class _MuseEegPainter extends CustomPainter {
-  _MuseEegPainter(this.channels);
+  _MuseEegPainter(this.channels, this.rate);
+  final int rate;
   final Map<String, List<double>> channels;
-  static const _colors = <Color>[
-    Colors.blue,
-    Colors.deepOrange,
-    Colors.green,
-    Colors.purple,
-    Colors.teal,
-    Colors.red,
-    Colors.indigo,
-    Colors.brown,
-  ];
-
   @override
   void paint(Canvas canvas, Size size) {
-    if (size.isEmpty) return;
-    final grid = Paint()
-      ..color = Colors.grey.shade300
-      ..strokeWidth = 1;
-    for (var i = 1; i < 4; i++) {
-      final y = size.height * i / 4;
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), grid);
+    final series = <String, List<(double, double)>>{};
+    var limit = 1.0;
+    for (final entry in channels.entries) {
+      series[entry.key] = [
+        for (var i = 0; i < entry.value.length; i++)
+          (
+            (i - entry.value.length + 1) / (rate > 0 ? rate : 256),
+            entry.value[i],
+          ),
+      ];
+      for (final value in entry.value) {
+        if (value.abs() > limit) limit = value.abs();
+      }
     }
-    var series = 0;
-    for (final points in channels.values) {
-      if (points.length < 2) {
-        series++;
-        continue;
-      }
-      final visible = points.length > 512
-          ? points.sublist(points.length - 512)
-          : points;
-      var low = visible.first;
-      var high = visible.first;
-      for (final value in visible) {
-        if (value < low) low = value;
-        if (value > high) high = value;
-      }
-      final span = high - low;
-      final path = Path();
-      for (var i = 0; i < visible.length; i++) {
-        final x = size.width * i / (visible.length - 1);
-        final normalized = span == 0 ? 0.5 : (visible[i] - low) / span;
-        final y = size.height * (0.1 + 0.8 * (1 - normalized));
-        if (i == 0) {
-          path.moveTo(x, y);
-        } else {
-          path.lineTo(x, y);
-        }
-      }
-      canvas.drawPath(
-        path,
-        Paint()
-          ..color = _colors[series % _colors.length]
-          ..strokeWidth = 1.5
-          ..style = PaintingStyle.stroke,
-      );
-      series++;
-    }
+    EegAxisPainter(
+      series,
+      left: -1024 / (rate > 0 ? rate : 256),
+      right: 0,
+      minimum: -limit,
+      maximum: limit,
+      yLabel: 'Raw EEG (µV)',
+      colors: {
+        for (final (index, key) in series.keys.indexed)
+          key: [
+            Colors.blue,
+            Colors.deepOrange,
+            Colors.teal,
+            Colors.purple,
+          ][index % 4],
+      },
+    ).paint(canvas, size);
   }
 
   @override

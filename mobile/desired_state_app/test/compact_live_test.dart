@@ -1,6 +1,7 @@
+import 'dart:convert';
+
 import 'package:desired_state_app/device_screen.dart';
 
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:desired_state_app/history_plot.dart';
@@ -185,12 +186,11 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(home: SessionHome(controller: controller)),
       );
+      await openScreen(tester, 'Live');
       await settleIo(
         tester,
-        () => find.byType(CircularProgressIndicator).evaluate().isEmpty,
+        () => find.byType(RelativeOverlayPlot).evaluate().isNotEmpty,
       );
-      await openScreen(tester, 'Live');
-      await tester.pumpAndSettle();
       final logger = controller.sessionLogger!;
       expect(find.byType(RelativeOverlayPlot), findsOneWidget);
       expect(find.byType(HistoryPlot), findsNothing);
@@ -202,10 +202,21 @@ void main() {
         (w) => w is Scrollable && w.axisDirection == AxisDirection.down,
       );
       expect(verticalScrolls, findsWidgets);
-      await tester.ensureVisible(find.textContaining('RMSSD 10.0'));
+      // Test the scaled summary's layout box, rather than the unscaled
+      // RenderParagraph centre used by a Text hit-test finder.
+      final rmssdSummary = find.ancestor(
+        of: find.textContaining('RMSSD 10.0'),
+        matching: find.byType(FittedBox),
+      );
+      expect(rmssdSummary, findsOneWidget);
+      await tester.ensureVisible(rmssdSummary);
+      await tester.pump();
       expect(find.byTooltip('Stop recording').hitTestable(), findsOneWidget);
-      expect(find.textContaining('RMSSD 10.0').hitTestable(), findsOneWidget);
+      expect(find.textContaining('RMSSD 10.0'), findsOneWidget);
+      expect(rmssdSummary.hitTestable(), findsOneWidget);
       await tester.ensureVisible(find.byType(RelativeOverlayPlot));
+      await tester.pump();
+      expect(find.byType(RelativeOverlayPlot).hitTestable(), findsOneWidget);
       await tester.tap(find.byType(RelativeOverlayPlot));
       await tester.pump();
       final frozen = tester
@@ -223,6 +234,10 @@ void main() {
         frozen,
       );
       await tester.ensureVisible(find.byTooltip('Back to live'));
+      // Apply the scroll layout before locating the tap point. Without this
+      // frame the stale centre can lie underneath the app bar.
+      await tester.pump();
+      expect(find.byTooltip('Back to live').hitTestable(), findsOneWidget);
       await tester.tap(find.byTooltip('Back to live'));
       await tester.pump();
       expect(
@@ -233,7 +248,14 @@ void main() {
         isTrue,
       );
       await tester.tap(find.byTooltip('Device connection'));
-      await tester.pumpAndSettle();
+      await settleIo(
+        tester,
+        () => find
+            .widgetWithText(AppBar, 'Devices')
+            .hitTestable()
+            .evaluate()
+            .isNotEmpty,
+      );
       expect(find.text('Scan for Polar H10'), findsNothing);
       await tester.scrollUntilVisible(
         find.text('Reconnect H10'),
@@ -251,16 +273,43 @@ void main() {
       );
       await tester.pump();
       expect(find.text('Reconnect H10').hitTestable(), findsOneWidget);
+      final connectsBefore = polar.connects;
       await tester.runAsync(() => tester.tap(find.text('Reconnect H10')));
-      await tester.pumpAndSettle();
+      // Recovery intentionally requires a measurement, not just a BLE link.
+      // Wait for the new fake link, then supply the recovery packet.
+      await settleIo(
+        tester,
+        () => polar.connects > connectsBefore && controller.recovering,
+      );
+      expect(controller.connected, isFalse);
       expect(controller.sessionLogger, same(logger));
-      polar.emit([1040, 1050]);
+      await tester.runAsync(() async {
+        polar.emit([1040, 1050]);
+      });
+      await settleIo(
+        tester,
+        () =>
+            controller.connected && !controller.recovering && !controller.busy,
+      );
+      expect(controller.sessionLogger, same(logger));
       expect(
         controller.analysisInputs.last.segment,
         isNot(controller.analysisInputs.first.segment),
       );
       await tester.pageBack();
-      await tester.pumpAndSettle();
+      // Live may schedule frames continuously, and settings load from disk.
+      // Wait for this route's usable state while allowing real I/O to run.
+      await settleIo(
+        tester,
+        () =>
+            find.byType(DeviceScreen).evaluate().isEmpty &&
+            find.byType(RelativeOverlayPlot).evaluate().isNotEmpty &&
+            find
+                .byTooltip('Stop recording')
+                .hitTestable()
+                .evaluate()
+                .isNotEmpty,
+      );
       expect(find.byTooltip('Stop recording').hitTestable(), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.runAsync(() async {

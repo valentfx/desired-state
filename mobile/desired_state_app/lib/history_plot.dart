@@ -76,14 +76,14 @@ class HistoryPlot extends StatelessWidget {
             if (values.isEmpty) const Text('No usable values in this range'),
             if (values.isNotEmpty)
               Text(
-                '${values.reduce(math.min).toStringAsFixed(1)} – ${values.reduce(math.max).toStringAsFixed(1)} $unit',
+                'Visible min ${values.reduce(math.min).toStringAsFixed(1)} / max ${values.reduce(math.max).toStringAsFixed(1)} $unit',
               ),
             LayoutBuilder(
               builder: (context, constraints) {
                 void inspect(double x) {
                   if (visible.isEmpty) return;
                   final fraction =
-                      ((x - 8) / math.max(1, constraints.maxWidth - 16)).clamp(
+                      ((x - 54) / math.max(1, constraints.maxWidth - 62)).clamp(
                         0.0,
                         1.0,
                       );
@@ -118,6 +118,7 @@ class HistoryPlot extends StatelessWidget {
                           events,
                           color,
                           cursor,
+                          unit,
                         ),
                       ),
                     ),
@@ -140,23 +141,43 @@ class _HistoryPainter extends CustomPainter {
     this.events,
     this.color,
     this.cursor,
+    this.unit,
   );
   final List<HistoryPoint> points;
   final DateTime start, end;
   final List<DateTime> events;
   final Color color;
+  final String unit;
   final DateTime? cursor;
   @override
   void paint(Canvas canvas, Size size) {
     final rect = Rect.fromLTWH(
-      8,
-      8,
-      math.max(1, size.width - 16),
-      size.height - 16,
+      54,
+      16,
+      math.max(1, size.width - 62),
+      size.height - 42,
     );
     final span = math.max(1, end.difference(start).inMicroseconds);
     double x(DateTime time) =>
         rect.left + time.difference(start).inMicroseconds / span * rect.width;
+    void label(String text, Offset at) {
+      final painter = TextPainter(
+        text: TextSpan(
+          text: text,
+          style: const TextStyle(fontSize: 10, color: Colors.black87),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: size.width);
+      painter.paint(canvas, at);
+    }
+
+    if (unit.isNotEmpty) label(unit, const Offset(0, 0));
+    label('0', Offset(rect.left, rect.bottom + 4));
+    label(
+      (span / 1000000).toStringAsFixed(0),
+      Offset(rect.right - 24, rect.bottom + 4),
+    );
+    label('Elapsed time (s)', Offset(rect.center.dx - 35, rect.bottom + 4));
     canvas.save();
     canvas.clipRect(rect);
     for (var i = 0; i < 5; i++) {
@@ -187,6 +208,17 @@ class _HistoryPainter extends CustomPainter {
           (value / scale - scaledLow + padding) /
               (scaledHigh - scaledLow + 2 * padding) *
               rect.height;
+      canvas.restore();
+      for (var i = 0; unit.isNotEmpty && i <= 4; i++) {
+        final value =
+            (scaledLow -
+                padding +
+                (scaledHigh - scaledLow + 2 * padding) * i / 4) *
+            scale;
+        label(value.toStringAsFixed(1), Offset(0, y(value) - 5));
+      }
+      canvas.save();
+      canvas.clipRect(rect);
       HistoryPoint? previous;
       final paint = Paint()
         ..color = color
@@ -250,7 +282,7 @@ class RelativeOverlayPlot extends StatelessWidget {
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
       void inspect(double x) {
-        final fraction = ((x - 8) / math.max(1, constraints.maxWidth - 16))
+        final fraction = ((x - 54) / math.max(1, constraints.maxWidth - 62))
             .clamp(0.0, 1.0);
         onInspect(
           start.add(
@@ -292,6 +324,7 @@ class RelativeOverlayPlot extends StatelessWidget {
                     events,
                     colors[entry.key]!,
                     cursor,
+                    '',
                   ),
                 ),
             ],

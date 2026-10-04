@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'h10_accelerometer.dart';
+import 'h10_ecg.dart';
 import 'device_models.dart';
 
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
@@ -41,7 +42,22 @@ class PolarH10Service {
   StreamSubscription<List<int>>? _controlSubscription, _accSubscription;
   Completer<List<int>>? _response;
   final List<int> _responseBytes = [];
-  int? _opcode;
+  int? _opcode, _measurementType;
+  BluetoothCharacteristic? _control;
+  final _ecgController = StreamController<H10EcgFrame>.broadcast(sync: true);
+  final _ecgStatuses = StreamController<String>.broadcast(sync: true);
+  Stream<H10EcgFrame> get ecgStream => _ecgController.stream;
+  Stream<String> get ecgStatusStream => _ecgStatuses.stream;
+  String ecgStatus = 'Not connected';
+  int _ecgRate = 0;
+  bool _ecgStarting = false;
+  final List<(List<int>, DateTime)> _earlyEcg = [];
+  void _setEcgStatus(String value) {
+    if (ecgStatus == value) return;
+    ecgStatus = value;
+    _ecgStatuses.add(value);
+  }
+
   int _accRate = 0, _accRange = 0;
   double _accFactor = 1;
   bool _accStarting = false;
@@ -159,12 +175,27 @@ class PolarH10Service {
       await measurement.setNotifyValue(true);
       if (generation != _generation) throw StateError('Connection cancelled');
       try {
-        await _startAcceleration(services, generation);
+        await _setupPmd(services, generation);
+        try {
+          await _startAcceleration(generation);
+        } catch (error) {
+          _accRate = 0;
+          _earlyAcc.clear();
+          _setAccStatus('Unavailable: $error');
+        }
+        try {
+          await _startEcg(generation);
+        } catch (error) {
+          _ecgRate = 0;
+          _earlyEcg.clear();
+          _setEcgStatus('Unavailable: $error');
+        }
       } catch (error) {
         _accRate = 0;
         _earlyAcc.clear();
         debugPrint('[H10 ACC ERROR] stage=$accelerationStatus error=$error');
         _setAccStatus('Unavailable: $error');
+        _setEcgStatus('Unavailable: $error');
       }
     } catch (_) {
       await _disconnect();
@@ -215,6 +246,7 @@ class PolarH10Service {
     final pending = Completer<List<int>>();
     _response = pending;
     _opcode = bytes.first;
+    _measurementType = bytes[1];
     _responseBytes.clear();
     // Install the timeout listener before writing: a response can be immediate.
     final result = pending.future.timeout(const Duration(seconds: 8));
@@ -231,7 +263,7 @@ class PolarH10Service {
     }
   }
 
-  Future<void> _startAcceleration(
+  Future<void> _setupPmd(
     List<BluetoothService> services,
     int generation,
   ) async {
@@ -246,6 +278,7 @@ class PolarH10Service {
       throw StateError('H10 PMD characteristics not found');
     }
     final cp = control, stream = data;
+    _control = cp;
     _setAccStatus('Subscribing to Polar PMD');
     _controlSubscription = cp.onValueReceived.listen((bytes) {
       if (generation != _generation) return;
@@ -256,7 +289,7 @@ class PolarH10Service {
           bytes.length < 4 ||
           bytes[0] != 0xf0 ||
           bytes[1] != _opcode ||
-          bytes[2] != 2) {
+          bytes[2] != _measurementType) {
         return;
       }
       if (bytes[3] != 0) {
@@ -280,6 +313,14 @@ class PolarH10Service {
       if (generation != _generation) return;
       final now = DateTime.now();
       _raw(stream, bytes, BlePacketDirection.rx, now);
+      if (bytes.isNotEmpty && bytes.first == 0) {
+        if (_ecgStarting) {
+          if (_earlyEcg.length < 16) _earlyEcg.add((List<int>.of(bytes), now));
+        } else {
+          _decodeEcg(bytes, now);
+        }
+        return;
+      }
       if (bytes.isEmpty || bytes.first != 2) return;
       if (_accStarting) {
         if (_earlyAcc.length < 16) _earlyAcc.add((List<int>.of(bytes), now));
@@ -289,6 +330,10 @@ class PolarH10Service {
     });
     await cp.setNotifyValue(true);
     await stream.setNotifyValue(true);
+  }
+
+  Future<void> _startAcceleration(int generation) async {
+    final cp = _control!;
     _setAccStatus('Querying ACC settings');
     final queryResponse = await _command(cp, [1, 2], generation);
     debugPrint('[H10 ACC QUERY] payload=$queryResponse');
@@ -319,6 +364,43 @@ class PolarH10Service {
     _earlyAcc.clear();
   }
 
+  Future<void> _startEcg(int generation) async {
+    final cp = _control!;
+    _setEcgStatus('Querying ECG settings');
+    final offered = H10AccProtocol.settings(
+      await _command(cp, [1, 0], generation),
+    );
+    if (!(offered[0]?.contains(130) ?? false) ||
+        !(offered[1]?.contains(14) ?? false)) {
+      throw const FormatException(
+        'H10 ECG 130 Hz / 14-bit setting not offered',
+      );
+    }
+    _ecgStarting = true;
+    try {
+      await _command(cp, H10EcgProtocol.start(130, 14), generation);
+      if (generation != _generation) return;
+      _ecgRate = 130;
+      _setEcgStatus('Started 130 Hz; waiting for data');
+      for (final (bytes, now) in _earlyEcg) {
+        _decodeEcg(bytes, now);
+      }
+    } finally {
+      _ecgStarting = false;
+      _earlyEcg.clear();
+    }
+  }
+
+  void _decodeEcg(List<int> bytes, DateTime now) {
+    if (_ecgRate == 0) return;
+    try {
+      _ecgController.add(H10EcgProtocol.decode(bytes, now, _ecgRate));
+      _setEcgStatus('Streaming 130 Hz');
+    } catch (error) {
+      _setEcgStatus('Decode failed; raw preserved: $error');
+    }
+  }
+
   void _decodeAcc(List<int> bytes, DateTime now) {
     if (_accRate == 0) return;
     try {
@@ -344,6 +426,8 @@ class PolarH10Service {
       pending.completeError(StateError('H10 disconnected'));
     }
     _setAccStatus('Disconnected');
+    _ecgRate = 0;
+    _setEcgStatus('Disconnected');
     _connectionController.add(false);
   }
 
@@ -414,9 +498,17 @@ class PolarH10Service {
     await _accSubscription?.cancel();
     _controlSubscription = null;
     _accSubscription = null;
-    // Pending requests expire safely; do not publish callbacks after cancellation.
+    final pending = _response;
+    if (pending != null && !pending.isCompleted) {
+      pending.completeError(StateError('H10 disconnected'));
+    }
     _response = null;
     _opcode = null;
+    _control = null;
+    _ecgRate = 0;
+    _ecgStarting = false;
+    _earlyEcg.clear();
+    _setEcgStatus('Not connected');
     _accRate = 0;
     _accFactor = 1;
     _earlyAcc.clear();
@@ -444,5 +536,7 @@ class PolarH10Service {
     await _accController.close();
     await _pmdPackets.close();
     await _accStatus.close();
+    await _ecgController.close();
+    await _ecgStatuses.close();
   }
 }

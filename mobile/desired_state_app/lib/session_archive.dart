@@ -14,10 +14,14 @@ Future<File> exportSessionDirectory(Directory directory) async {
     'o2ring_measurements.jsonl',
     'o2ring_raw.jsonl',
     'h10_accelerometer.jsonl',
+    'h10_ecg.jsonl',
     'h10_pmd_raw.jsonl',
+    'muse_eeg.jsonl',
+    'muse_bands.jsonl',
     'marker_notes.jsonl',
     'history_edits.jsonl',
     'processing_views.jsonl',
+    'analysis_reviews.jsonl',
   ]) {
     final file = File('${directory.path}/$fileName');
     if (await FileSystemEntity.type(file.path, followLinks: false) !=

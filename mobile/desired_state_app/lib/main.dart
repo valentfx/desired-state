@@ -11,6 +11,12 @@ import 'session_history.dart';
 import 'app_navigation.dart';
 import 'device_screen.dart';
 import 'overview_screen.dart';
+import 'participant_tools.dart';
+import 'eeg_live_panel.dart';
+import 'ecg_live_panel.dart';
+import 'session_review_screen.dart';
+import 'practice_screen.dart';
+import 'settings_screen.dart';
 
 void main() {
   runApp(const DesiredStateApp());
@@ -113,10 +119,23 @@ class _SessionHomeState extends State<SessionHome> {
               ListTile(
                 leading: const Icon(Icons.person_outline),
                 title: const Text('Participants'),
-                subtitle: const Text(
-                  'Select the viewed participant in Overview',
+                onTap: () => _open(
+                  ParticipantsScreen(
+                    store: ParticipantStore(
+                      directoryProvider: widget.controller.directoryProvider,
+                    ),
+                    onViewSessions: (profile) => _navigator.currentState?.push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => HistoryScreen(
+                          controller: widget.controller,
+                          initialParticipantId: profile.id,
+                          analyze: true,
+                          onLive: () => _select(1),
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
-                onTap: () => _select(0),
               ),
               ListTile(
                 leading: const Icon(Icons.monitor_heart_outlined),
@@ -128,18 +147,24 @@ class _SessionHomeState extends State<SessionHome> {
                 title: const Text('Analyze'),
                 onTap: () => _select(2),
               ),
-              const Divider(),
+              ListTile(
+                leading: const Icon(Icons.spa_outlined),
+                title: const Text('Practice'),
+                onTap: () =>
+                    _open(PracticeScreen(controller: widget.controller)),
+              ),
               ListTile(
                 leading: const Icon(Icons.bluetooth),
                 title: const Text('Devices'),
                 onTap: () => _open(DeviceScreen(controller: widget.controller)),
               ),
               ListTile(
-                leading: const Icon(Icons.tune),
-                title: const Text('Processing & plots'),
+                leading: const Icon(Icons.settings_outlined),
+                title: const Text('Settings'),
                 onTap: () =>
-                    _open(ProcessingScreen(controller: widget.controller)),
+                    _open(SettingsScreen(controller: widget.controller)),
               ),
+              const Divider(),
               ListTile(
                 leading: const Icon(Icons.science_outlined),
                 title: const Text('Advanced tools'),
@@ -176,6 +201,7 @@ class _SessionHomeState extends State<SessionHome> {
                   HistoryScreen(
                     controller: widget.controller,
                     revision: selection.$2,
+                    analyze: true,
                     onLive: () => _select(1),
                   ),
                 ],
@@ -205,7 +231,9 @@ class _CollectorScreenState extends State<CollectorScreen> {
   String get _status => _controller.error ?? _controller.status;
   String get _deviceName => _controller.connected || _controller.polarId != null
       ? _controller.deviceName
-      : _controller.ringName;
+      : _controller.ringId != null
+      ? _controller.ringName
+      : 'Muse S Athena';
 
   RecordingState get _recordingState => _controller.recordingState;
 
@@ -215,6 +243,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
   SessionLogger? get _sessionLogger => _controller.sessionLogger;
   SessionLogger? get _lastSessionLogger => _controller.lastSessionLogger;
 
+  final _eegPanelKey = GlobalKey();
   final _participantNameController = TextEditingController();
   final _eventDescriptionController = TextEditingController();
 
@@ -322,6 +351,39 @@ class _CollectorScreenState extends State<CollectorScreen> {
   }
 
   String _participantName() => _controller.participant;
+  Future<void> _editParticipant() async {
+    final active = _controller.sessionLogger != null;
+    final values = await editParticipant(
+      context,
+      name: active ? _controller.participant : _participantNameController.text,
+      info: _controller.participantInfo,
+      participantId: _controller.participantId,
+      store: ParticipantStore(directoryProvider: _controller.directoryProvider),
+      correction: active,
+    );
+    if (values == null) return;
+    try {
+      if (active) {
+        await _controller.editRecordingParticipant(
+          values.$1,
+          values.$2,
+          profileId: values.$3,
+        );
+        _participantNameController.text = values.$1;
+      } else {
+        _participantNameController.text = values.$1;
+        _controller.participantInfo = values.$2;
+        _controller.participantId = values.$3;
+      }
+      if (mounted) setState(() {});
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Participant not saved: $error')),
+        );
+      }
+    }
+  }
 
   Future<void> _markEvent() async {
     await _controller.markEvent(_eventDescriptionController.text);
@@ -329,7 +391,18 @@ class _CollectorScreenState extends State<CollectorScreen> {
   }
 
   Future<void> _startSession() async {
-    await _controller.start(participantName: _participantNameController.text);
+    await _controller.start(
+      participantName: _participantNameController.text,
+      participantProfileId: _controller.participantId,
+    );
+    if (_controller.sessionLogger != null &&
+        _controller.participantInfo.isNotEmpty) {
+      await _controller.editRecordingParticipant(
+        _controller.participant,
+        _controller.participantInfo,
+        profileId: _controller.participantId,
+      );
+    }
     if (mounted) setState(() => _showConnect = false);
   }
 
@@ -413,6 +486,36 @@ class _CollectorScreenState extends State<CollectorScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _reviewLastSession() async {
+    final logger = _lastSessionLogger;
+    if (logger == null || _controller.busy) return;
+    try {
+      final repository = SessionHistoryRepository(
+        directoryProvider: _controller.directoryProvider,
+        activeSessionId: () => _controller.sessionLogger?.sessionId,
+      );
+      final entry = await repository.readEntry(logger.directory);
+      final session = await repository.open(entry);
+      if (!mounted) return;
+      await Navigator.push(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => SessionReviewScreen(
+            session: session,
+            repository: repository,
+            controller: _controller,
+          ),
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not review session: $error')),
+        );
+      }
+    }
   }
 
   Future<void> _exportLastSession() async {
@@ -508,6 +611,9 @@ class _CollectorScreenState extends State<CollectorScreen> {
       _streamStatus(),
       if (_controller.polarId != null) _accLine(),
       if (_controller.ringId != null) _ringLine(),
+      EegLivePanel(key: _eegPanelKey, controller: _controller),
+      EcgLivePanel(controller: _controller),
+      PracticeLiveControls(controller: _controller),
       QuickMarkerBar(controller: _controller),
       if (_lastSessionLogger != null)
         TextButton(
@@ -517,10 +623,19 @@ class _CollectorScreenState extends State<CollectorScreen> {
       const SizedBox(height: 24),
       TextField(
         controller: _participantNameController,
+        onChanged: (_) {
+          _controller.participantInfo = '';
+          _controller.participantId = null;
+        },
         decoration: const InputDecoration(
           labelText: 'Participant name',
           hintText: 'Optional; blank records as unassigned',
         ),
+      ),
+      TextButton.icon(
+        onPressed: _editParticipant,
+        icon: const Icon(Icons.person_outline),
+        label: const Text('Choose / edit participant'),
       ),
       const SizedBox(height: 12),
       if (_connected) ...[
@@ -535,7 +650,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
         FilledButton.icon(
           onPressed: _openDevice,
           icon: const Icon(Icons.bluetooth),
-          label: const Text('Connect H10'),
+          label: const Text('Connect devices'),
         ),
       ],
     ],
@@ -582,6 +697,9 @@ class _CollectorScreenState extends State<CollectorScreen> {
             controller: _controller,
             embedded: true,
             header: [
+              EegLivePanel(key: _eegPanelKey, controller: _controller),
+              EcgLivePanel(controller: _controller),
+              PracticeLiveControls(controller: _controller),
               _streamStatus(),
               if (_controller.polarId != null) _accLine(),
               if (_controller.ringId != null) _ringLine(),
@@ -606,6 +724,11 @@ class _CollectorScreenState extends State<CollectorScreen> {
                       '${_participantName()} | $_deviceName',
                       overflow: TextOverflow.ellipsis,
                     ),
+                  ),
+                  IconButton(
+                    tooltip: 'Edit participant',
+                    onPressed: _controller.busy ? null : _editParticipant,
+                    icon: const Icon(Icons.person_outline),
                   ),
                   Text(_formatDuration(_sessionElapsed)),
                 ],
@@ -672,6 +795,11 @@ class _CollectorScreenState extends State<CollectorScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text('Session saved', style: Theme.of(context).textTheme.headlineSmall),
+        FilledButton.icon(
+          onPressed: _controller.busy ? null : _reviewLastSession,
+          icon: const Icon(Icons.analytics_outlined),
+          label: const Text('Review session'),
+        ),
         QuickMarkerBar(controller: _controller),
         const SizedBox(height: 8),
         Text(
