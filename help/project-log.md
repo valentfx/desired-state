@@ -313,3 +313,12 @@ User supplied session 202610021824303_E9E53B2C (~34.4 s). Verified 49 ACC TYPE_1
 
 ## Overview refresh callback fix — 2026-10-02
 The isolated menu-navigation test identified a production assertion: Overview refresh returned the Future assigned to its session list from a setState expression callback. Changed it to a synchronous block callback. Existing menu/navigation tests exercise this refresh. Full Flutter analysis/tests and Android build remain required on the PC; they were not run here for this fix. No acquisition, recording storage or Android identity changed.
+
+
+## Compact interface update 2026-10-04
+
+2026-10-04: prepared compact interface update. Moved full ECG/EEG/ACC inspection to device details, retained stream ownership, added recording/display preferences and posture calibration snapshots, and added a common session timeline with native worker parsing and incremental follow reads. Automated Flutter/Android checks run below; hardware validation remains pending.
+
+## Work PC integration 2026-10-05
+Merged origin/main into the work PC branch. Retained local calibration validation notes and resolved documentation conflicts. Windows release build and launch succeeded before this merge. Desktop inventory found 23 sessions and 187 JSONL files dated October 2 through October 5 by session IDs; all scanned backup sessions are present. No post-merge tests rerun because the merge changes documentation and adds a historical Gradle backup file.
+Planned work: User and Research experiences in one app; defined 0-10 pre, during and post ratings; reusable session presets; clearer phone sync progress; HRV Logger import. Future changes must update working docs and use descriptive commits with validation details.

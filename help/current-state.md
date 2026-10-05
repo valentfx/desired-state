@@ -251,3 +251,8 @@ Physical work-test connected HR but ACC reported Truncated PMD settings. Researc
 
 ## Physical H10 ACC export verified — 2026-10-02
 User supplied session 202610021824303_E9E53B2C (~34.4 s). Verified 49 ACC TYPE_1 frames, 1,764 signed XYZ samples, 49 matching raw PMD RX packets, 35 HR rows and 43 RR rows. Independent signed-16-bit little-endian decode reproduced every recorded axis; exact device timestamps, raw bytes, receipt timestamps and session/device/user identity matched. Negotiated 50 Hz ±8 g; no packet-clock reversal or evident inter-frame gap. Median vector magnitude 995.86 mG. Sensor timestamps imply ~50.98 samples/s, so configured rate is nominal and interpolation is not verified absolute timing. All packet receipts lie within start/stop. O2 streams empty; manifest H10 only. No pause/resume events; this export does not validate pause/resume, mixed-device acquisition, posture/tap detection or overnight acceleration durability.
+
+
+## Compact interface update 2026-10-04
+
+Compact Live, device detail diagnostics/recording controls, persistent display/recording preferences, H10 gravity calibration and a shared active/saved signal timeline are present in source. Runtime validation is pending until this installer completes; hardware and overnight validation remain pending. Display choices do not disable recording. Calibration/configuration snapshots accompany sessions.
