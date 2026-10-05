@@ -136,7 +136,7 @@ class QuickMarkerManager extends StatelessWidget {
             const Padding(
               padding: EdgeInsets.all(16),
               child: Text(
-                'Use the arrows to reorder buttons. Renaming or removing a button keeps past events unchanged.',
+                'Most-used buttons appear first. Arrows set the order for equal usage counts. Renaming or removing a button keeps past events unchanged.',
               ),
             ),
             if (!store.ready) Text(store.error ?? 'Loading markers…'),
@@ -149,6 +149,9 @@ class QuickMarkerManager extends StatelessWidget {
               ListTile(
                 key: ValueKey(item.id),
                 title: Text(item.label),
+                subtitle: Text(
+                  'Used ${item.uses} times${item.activityId == null ? "" : " · activity"}',
+                ),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -183,6 +186,32 @@ class QuickMarkerManager extends StatelessWidget {
                     ),
                   ],
                 ),
+              ),
+            if (store.ready)
+              ExpansionTile(
+                title: const Text('Add activity buttons'),
+                children: [
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: [
+                      for (final activity in activityMarkerCatalog.where(
+                        (a) => !store.items.any(
+                          (m) => m.activityId == a.activityId || m.id == a.id,
+                        ),
+                      ))
+                        ActionChip(
+                          label: Text(activity.label),
+                          onPressed: store.saving
+                              ? null
+                              : () => _change(
+                                  context,
+                                  store.addActivity(activity),
+                                ),
+                        ),
+                    ],
+                  ),
+                ],
               ),
           ],
         ),
@@ -292,23 +321,27 @@ class _QuickMarkerBarState extends State<QuickMarkerBar> {
       builder: (context, _) => widget.compact && store.ready
           ? Row(
               children: [
-                for (final item in store.items.take(2))
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.only(right: 4),
-                      child: FilledButton.tonal(
-                        onPressed:
-                            controller.sessionLogger != null && !controller.busy
-                            ? () => _record(item)
-                            : null,
-                        child: Text(
-                          item.label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
+                Expanded(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        for (final item in store.items)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 6),
+                            child: FilledButton.tonal(
+                              onPressed:
+                                  controller.sessionLogger != null &&
+                                      !controller.busy
+                                  ? () => _record(item)
+                                  : null,
+                              child: Text(item.label),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
+                ),
                 IconButton(
                   tooltip: 'More markers and events',
                   icon: const Icon(Icons.more_horiz),

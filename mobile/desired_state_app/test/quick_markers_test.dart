@@ -17,6 +17,36 @@ void main() {
   });
 
   test(
+    'activity favorites rank by successful use and persist across restart',
+    () async {
+      await store.load();
+      final yoga = activityMarkerCatalog.firstWhere(
+        (m) => m.activityId == 'yoga',
+      );
+      final running = activityMarkerCatalog.firstWhere(
+        (m) => m.activityId == 'running',
+      );
+      await store.addActivity(yoga);
+      await store.addActivity(running);
+      await store.recordUse(running.id);
+      await store.recordUse(yoga.id);
+      await store.recordUse(yoga.id);
+      expect(store.items.first.activityId, 'yoga');
+      expect(store.items.first.uses, 2);
+      await store.rename(yoga.id, 'My yoga');
+      final restarted = QuickMarkerStore(directoryProvider: () async => root);
+      addTearDown(restarted.dispose);
+      await restarted.load();
+      expect(restarted.items.first.label, 'My yoga');
+      expect(restarted.items.first.activityId, 'yoga');
+      expect(restarted.items.first.uses, 2);
+      await restarted.remove(yoga.id);
+      expect(restarted.items.any((m) => m.id == yoga.id), isFalse);
+      await expectLater(restarted.addActivity(running), throwsFormatException);
+    },
+  );
+
+  test(
     'add rename reorder remove and empty list persist across restart',
     () async {
       await store.load();

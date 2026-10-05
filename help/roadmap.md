@@ -154,3 +154,7 @@ User supplied session 202610021824303_E9E53B2C (~34.4 s). Verified 49 ACC TYPE_1
 ## Compact interface update 2026-10-04
 
 Next verification: short combined recording; posture reference checks; screen-off and reconnect test; storage/export check; overnight run. Persistent random-access signal indexing and validated sleep/stimulation models remain pending. Timeline uses bounded-memory scanning and approximate receipt-time alignment.
+
+## State feedback and central storage follow-up 2026-10-05
+
+First implementation: session context and optional pre/live/post rating journal, exports, phone follow-ups and desktop viewer. Complete acceptance checks before device rollout. Next: persist named presets, add User/Research experiences and concurrent activity events, then baseline/outcome summaries and timeline ratings. Implement authentication, private file catalog, resumable verified uploads and permissions against [state-feedback-and-upload-contract.md](state-feedback-and-upload-contract.md). Add legacy HRV Logger import without altering original exports. Improve phone sync progress with session/file/byte reporting.

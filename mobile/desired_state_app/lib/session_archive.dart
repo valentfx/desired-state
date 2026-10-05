@@ -22,6 +22,7 @@ Future<File> exportSessionDirectory(Directory directory) async {
     'history_edits.jsonl',
     'processing_views.jsonl',
     'analysis_reviews.jsonl',
+    'state_feedback.jsonl',
   ]) {
     final file = File('${directory.path}/$fileName');
     if (await FileSystemEntity.type(file.path, followLinks: false) !=

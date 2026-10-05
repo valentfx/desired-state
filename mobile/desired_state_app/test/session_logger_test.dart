@@ -6,6 +6,39 @@ import 'package:desired_state_app/session_logger.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test(
+    'activity markers preserve machine identity and immutable labels',
+    () async {
+      final temp = await Directory.systemTemp.createTemp('activity-marker-');
+      addTearDown(() => temp.delete(recursive: true));
+      final logger = await SessionLogger.start(
+        polarId: 'TEST',
+        deviceName: 'Test',
+        participantName: 'Person',
+        directoryProvider: () async => temp,
+      );
+      await logger.writeEvent(
+        'marked_event',
+        eventId: 'event-1',
+        markerDefinitionId: 'activity-yoga',
+        markerLabel: 'Yoga',
+        markerType: 'quick',
+        activityId: 'yoga',
+        flush: true,
+      );
+      await logger.close();
+      final rows = (await File(
+        '${logger.directory.path}/events.jsonl',
+      ).readAsLines()).map(jsonDecode).toList();
+      final marker = rows.firstWhere((r) => r['event_id'] == 'event-1');
+      expect(marker['activity_id'], 'yoga');
+      expect(marker['activity_action'], 'mark');
+      expect(marker['activity_schema_version'], 1);
+      expect(marker['marker_label'], 'Yoga');
+      expect(marker.containsKey('duration'), false);
+    },
+  );
+
   test('writes a Flask-compatible identifiable session', () async {
     final temporary = await Directory.systemTemp.createTemp(
       'desired-state-log-',

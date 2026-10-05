@@ -13,6 +13,7 @@ import 'device_models.dart';
 import 'recording_foreground_service.dart';
 import 'rr_history.dart';
 import 'session_logger.dart';
+import 'state_feedback.dart';
 import 'quick_markers.dart';
 import 'processing.dart';
 import 'muse_athena_service.dart';
@@ -496,6 +497,7 @@ class SessionController extends ChangeNotifier {
   RecordingState recordingState = RecordingState.stopped;
   SessionLogger? sessionLogger;
   SessionLogger? lastSessionLogger;
+  SessionContext sessionContext = const SessionContext();
   String? _visibleSessionId;
   DateTime? sessionStartedAt;
   BluetoothDevice? _target;
@@ -712,6 +714,7 @@ class SessionController extends ChangeNotifier {
     required String participantName,
     String? participantProfileId,
     String description = '',
+    SessionContext context = const SessionContext(),
   }) async {
     if (!canStart || sessionLogger != null || busy) {
       return;
@@ -770,6 +773,7 @@ class SessionController extends ChangeNotifier {
         },
         participantName: participant,
         participantId: participantId,
+        context: context,
         description: description,
         directoryProvider: directoryProvider,
       );
@@ -777,6 +781,7 @@ class SessionController extends ChangeNotifier {
         await opened.close();
         return;
       }
+      sessionContext = context;
       await opened.writeEvent(
         'processing_configuration_initial',
         description: jsonEncode(
@@ -1199,8 +1204,16 @@ class SessionController extends ChangeNotifier {
       markerDefinitionId: definition?.id,
       markerLabel: marker.label,
       markerType: definition == null ? 'manual' : 'quick',
+      activityId: definition?.activityId,
       flush: true,
     );
+    if (definition != null) {
+      try {
+        await quickMarkers.recordUse(definition.id);
+      } catch (_) {
+        status = 'Marker saved; button usage count could not be saved';
+      }
+    }
     // A slow write completing after a new session starts belongs to the old log.
     if (_disposed || _visibleSessionId != logger.sessionId) {
       return marker;

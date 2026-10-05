@@ -12,6 +12,7 @@ import 'desktop_store.dart';
 import 'desktop_sync.dart';
 import 'desktop_inspection.dart';
 import 'session_history.dart';
+import 'state_feedback_widgets.dart';
 
 class DesktopScreen extends StatefulWidget {
   const DesktopScreen({super.key});
@@ -863,6 +864,25 @@ class _DesktopScreenState extends State<DesktopScreen> {
     appBar: AppBar(
       title: const Text('Desired State · Analyze'),
       actions: [
+        IconButton(
+          tooltip: 'State feedback',
+          icon: const Icon(Icons.sentiment_satisfied_alt),
+          onPressed: _busy || _entry == null
+              ? null
+              : () {
+                  final entry = _entry!;
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => SessionFeedbackScreen(
+                        directory: entry.directory,
+                        sessionId: entry.id,
+                        allowWrite: false,
+                      ),
+                    ),
+                  );
+                },
+        ),
         TextButton.icon(
           onPressed: _busy || _root == null ? null : _syncPhone,
           icon: const Icon(Icons.sync),

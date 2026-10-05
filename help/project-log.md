@@ -322,3 +322,21 @@ The isolated menu-navigation test identified a production assertion: Overview re
 ## Work PC integration 2026-10-05
 Merged origin/main into the work PC branch. Retained local calibration validation notes and resolved documentation conflicts. Windows release build and launch succeeded before this merge. Desktop inventory found 23 sessions and 187 JSONL files dated October 2 through October 5 by session IDs; all scanned backup sessions are present. No post-merge tests rerun because the merge changes documentation and adds a historical Gradle backup file.
 Planned work: User and Research experiences in one app; defined 0-10 pre, during and post ratings; reusable session presets; clearer phone sync progress; HRV Logger import. Future changes must update working docs and use descriptive commits with validation details.
+
+## State feedback foundation 2026-10-05
+
+Added optional session context and defined 0–10 pre/live/post feedback. Live opens a compact rating sheet; Start and Stop remain independent of feedback. Append-only state_feedback.jsonl preserves question definitions, goal, phase, event/entry times and stable session identity; exports and existing JSONL phone sync retain the journal. Phone History supports current-time follow-ups for stopped sessions; Windows provides a read-only viewer. Legacy sessions have no invented answers. Persistent presets, full experience switching, timeline overlays and backend uploads remain pending. See [state-feedback-and-upload-contract.md](state-feedback-and-upload-contract.md).
+
+Validation: matching Dart 3.13.4 formatting/parsing and standalone journal checks passed (11 ordered writes including zero, unique event IDs, corruption preservation). Full Flutter analysis/tests/build could not run: pub.dev access was blocked and required dependencies are absent from cache. New regression tests are included; the PC installer gates builds on analysis and the full test suite. Physical phone and Windows validation remain required.
+
+## Activity marker update
+
+Start remains immediate without setup. Add activity buttons through Quick markers: yoga, resistance training, breathwork, sound bowls, meditation, stretching, running, steam room, sauna, swimming, pickleball, walking, cycling, haptics, audio and rest. Existing user lists are not replaced. Custom labels, add/remove/rename and persistence remain supported. Most-used favorites sort first; equal usage counts retain the saved ordering. The compact Live row scrolls horizontally to reach all favorites. Usage increments only after a successful marker write. Old definitions read with zero usage and no activity ID. Past event labels/IDs remain immutable.
+
+Catalog activity markers add activity_id, activity_schema_version 1 and activity_action mark to existing marked_event rows. These are instant observations, not inferred start/stop intervals. Custom markers retain stable marker_definition_id and label snapshots without inventing an activity category. Backend event ingestion must preserve these fields. Explicit duration/start/stop controls remain pending.
+
+## Activity marker layout repair 2026-10-05
+First PC validation passed Flutter analysis and 133 tests; marker manager regression failed because the expanded activity catalog pushed favorites below the visible area. Moved the catalog below saved markers and collapsed it by default. Original test retained. Full validation rerun follows.
+
+## State feedback PC software validation 20261005-162740
+Installer completed dependency resolution, Dart formatting, Flutter analysis, full tests, Windows release build and Android debug APK build. Validation transcript: F:\1dev\desired-state-feedback-validation-20261005-162740\validation.log. Phone behavior and Windows interaction still require hardware checks. No backend has been deployed.

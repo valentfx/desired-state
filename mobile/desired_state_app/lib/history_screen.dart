@@ -4,6 +4,7 @@ import 'package:share_plus/share_plus.dart';
 import 'history_plot.dart';
 import 'session_controller.dart';
 import 'session_history.dart';
+import 'state_feedback_widgets.dart';
 import 'participant_tools.dart';
 import 'processing_screen.dart';
 import 'session_review_screen.dart';
@@ -500,6 +501,22 @@ class _HistoryDetailScreenState extends State<HistoryDetailScreen> {
     appBar: AppBar(
       title: const Text('Session history'),
       actions: [
+        IconButton(
+          tooltip: 'State feedback',
+          icon: const Icon(Icons.sentiment_satisfied_alt),
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute<void>(
+              builder: (_) => SessionFeedbackScreen(
+                directory: widget.entry.directory,
+                sessionId: widget.entry.id,
+                allowWrite:
+                    widget.controller.sessionLogger?.sessionId !=
+                    widget.entry.id,
+              ),
+            ),
+          ),
+        ),
         IconButton(
           tooltip: 'Processing & plots',
           icon: const Icon(Icons.tune),
