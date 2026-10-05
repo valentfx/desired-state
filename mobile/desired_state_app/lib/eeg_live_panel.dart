@@ -30,7 +30,9 @@ class _EegLivePanelState extends State<EegLivePanel> {
   int _seconds = 60;
   Future<void> _captureBaseline(MuseAthenaService muse) async {
     final frame = muse.latestBands;
-    if (frame == null || frame.channels.isEmpty || !muse.fresh) return;
+    if (frame == null || frame.channels.isEmpty || !muse.fresh) {
+      return;
+    }
     final recent = muse.bandHistory
         .where(
           (f) =>
@@ -106,7 +108,9 @@ class _EegLivePanelState extends State<EegLivePanel> {
       final left = math.max(0.0, right - _seconds);
       for (final point in history) {
         final t = point.time.difference(firstTime).inMilliseconds / 1000;
-        if (t < left || t > right) continue;
+        if (t < left || t > right) {
+          continue;
+        }
         final selected = point.values(_channel, relative: _relative);
         for (final band in bands.keys) {
           bands[band]!.add((t, selected[band] ?? double.nan));
@@ -324,9 +328,13 @@ class _EegLivePanelState extends State<EegLivePanel> {
     final series = <String, List<(double, double)>>{};
     var limit = 1.0;
     for (final channel in muse.eegHistory.entries) {
-      if (_channel != null && _channel != channel.key) continue;
+      if (_channel != null && _channel != channel.key) {
+        continue;
+      }
       final points = channel.value;
-      if (points.isEmpty) continue;
+      if (points.isEmpty) {
+        continue;
+      }
       series[channel.key] = [
         for (var i = 0; i < points.length; i++)
           ((i - points.length + 1) / math.max(1, muse.eegRate), points[i]),
@@ -387,6 +395,7 @@ class EegAxisPainter extends CustomPainter {
     this.references = const {},
     this.showPoints = false,
     this.events = const [],
+    this.maximumGapSeconds = 5,
   });
   final Map<String, List<(double, double)>> series;
   final double left, right, minimum, maximum;
@@ -394,11 +403,14 @@ class EegAxisPainter extends CustomPainter {
   final Map<String, Color> colors;
   final Map<String, double> references;
   final bool showPoints;
+  final double? maximumGapSeconds;
   final List<double> events;
   @override
   void paint(Canvas canvas, Size size) {
     final area = Rect.fromLTRB(58, 22, size.width - 8, size.height - 36);
-    if (area.width <= 0 || area.height <= 0) return;
+    if (area.width <= 0 || area.height <= 0) {
+      return;
+    }
     void label(String text, Offset position) {
       final painter = TextPainter(
         text: TextSpan(
@@ -416,8 +428,9 @@ class EegAxisPainter extends CustomPainter {
         area.bottom - (value - minimum) / (maximum - minimum) * area.height;
     label(yLabel, const Offset(0, 0));
     final grid = Paint()..color = Colors.grey.shade400;
-    for (var i = 0; i <= 4; i++) {
-      final value = minimum + (maximum - minimum) * i / 4;
+    final divisions = area.height < 80 ? 1 : 4;
+    for (var i = 0; i <= divisions; i++) {
+      final value = minimum + (maximum - minimum) * i / divisions;
       canvas.drawLine(
         Offset(area.left, y(value)),
         Offset(area.right, y(value)),
@@ -455,7 +468,11 @@ class EegAxisPainter extends CustomPainter {
           previous = null;
           continue;
         }
-        if (previous != null && point.$1 - previous > 2) started = false;
+        if (previous != null &&
+            maximumGapSeconds != null &&
+            point.$1 - previous > maximumGapSeconds!) {
+          started = false;
+        }
         if (!started) {
           path.moveTo(x(point.$1), y(point.$2));
           started = true;

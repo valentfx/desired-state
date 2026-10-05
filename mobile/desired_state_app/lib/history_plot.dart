@@ -9,7 +9,9 @@ List<HistoryPoint> reduceHistoryPoints(
   List<HistoryPoint> points, {
   int target = 800,
 }) {
-  if (points.length <= target) return points;
+  if (points.length <= target) {
+    return points;
+  }
   final keep = <int>{};
   final step = math.max(1, (points.length / (target / 4)).ceil());
   for (var start = 0; start < points.length; start += step) {
@@ -19,19 +21,29 @@ List<HistoryPoint> reduceHistoryPoints(
     for (var i = start; i < end; i++) {
       final value = points[i].value;
       if (value != null) {
-        if (low == null || value < points[low].value!) low = i;
-        if (high == null || value > points[high].value!) high = i;
+        if (low == null || value < points[low].value!) {
+          low = i;
+        }
+        if (high == null || value > points[high].value!) {
+          high = i;
+        }
       }
       if (value == null ||
           (i > 0 &&
               (points[i - 1].value == null ||
                   points[i - 1].segment != points[i].segment))) {
         keep.add(i);
-        if (i > 0) keep.add(i - 1);
+        if (i > 0) {
+          keep.add(i - 1);
+        }
       }
     }
-    if (low != null) keep.add(low);
-    if (high != null) keep.add(high);
+    if (low != null) {
+      keep.add(low);
+    }
+    if (high != null) {
+      keep.add(high);
+    }
   }
   final indices = keep.toList()..sort();
   return [for (final i in indices) points[i]];
@@ -81,7 +93,9 @@ class HistoryPlot extends StatelessWidget {
             LayoutBuilder(
               builder: (context, constraints) {
                 void inspect(double x) {
-                  if (visible.isEmpty) return;
+                  if (visible.isEmpty) {
+                    return;
+                  }
                   final fraction =
                       ((x - 54) / math.max(1, constraints.maxWidth - 62)).clamp(
                         0.0,
@@ -141,20 +155,24 @@ class _HistoryPainter extends CustomPainter {
     this.events,
     this.color,
     this.cursor,
-    this.unit,
-  );
+    this.unit, {
+    this.rightAxis = false,
+    this.reserveRightAxis = false,
+    this.drawFrame = true,
+  });
   final List<HistoryPoint> points;
   final DateTime start, end;
   final List<DateTime> events;
   final Color color;
   final String unit;
+  final bool rightAxis, reserveRightAxis, drawFrame;
   final DateTime? cursor;
   @override
   void paint(Canvas canvas, Size size) {
     final rect = Rect.fromLTWH(
       54,
       16,
-      math.max(1, size.width - 62),
+      math.max(1, size.width - (reserveRightAxis ? 108 : 62)),
       size.height - 42,
     );
     final span = math.max(1, end.difference(start).inMicroseconds);
@@ -164,23 +182,30 @@ class _HistoryPainter extends CustomPainter {
       final painter = TextPainter(
         text: TextSpan(
           text: text,
-          style: const TextStyle(fontSize: 10, color: Colors.black87),
+          style: TextStyle(
+            fontSize: 10,
+            color: unit.isNotEmpty ? color : Colors.black87,
+          ),
         ),
         textDirection: TextDirection.ltr,
       )..layout(maxWidth: size.width);
       painter.paint(canvas, at);
     }
 
-    if (unit.isNotEmpty) label(unit, const Offset(0, 0));
-    label('0', Offset(rect.left, rect.bottom + 4));
-    label(
-      (span / 1000000).toStringAsFixed(0),
-      Offset(rect.right - 24, rect.bottom + 4),
-    );
-    label('Elapsed time (s)', Offset(rect.center.dx - 35, rect.bottom + 4));
+    if (unit.isNotEmpty) {
+      label(unit, Offset(rightAxis ? size.width - 46 : 0, 0));
+    }
+    if (drawFrame) {
+      label('0', Offset(rect.left, rect.bottom + 4));
+      label(
+        (span / 1000000).toStringAsFixed(0),
+        Offset(rect.right - 24, rect.bottom + 4),
+      );
+      label('Elapsed time (s)', Offset(rect.center.dx - 35, rect.bottom + 4));
+    }
     canvas.save();
     canvas.clipRect(rect);
-    for (var i = 0; i < 5; i++) {
+    for (var i = 0; drawFrame && i < 5; i++) {
       final y = rect.top + i * rect.height / 4;
       canvas.drawLine(
         Offset(rect.left, y),
@@ -188,7 +213,7 @@ class _HistoryPainter extends CustomPainter {
         Paint()..color = Colors.grey.withValues(alpha: .25),
       );
     }
-    for (final event in events) {
+    for (final event in (drawFrame ? events : <DateTime>[])) {
       canvas.drawLine(
         Offset(x(event), rect.top),
         Offset(x(event), rect.bottom),
@@ -215,7 +240,10 @@ class _HistoryPainter extends CustomPainter {
                 padding +
                 (scaledHigh - scaledLow + 2 * padding) * i / 4) *
             scale;
-        label(value.toStringAsFixed(1), Offset(0, y(value) - 5));
+        label(
+          value.toStringAsFixed(1),
+          Offset(rightAxis ? rect.right + 4 : 0, y(value) - 5),
+        );
       }
       canvas.save();
       canvas.clipRect(rect);
@@ -236,7 +264,7 @@ class _HistoryPainter extends CustomPainter {
             paint,
           );
         }
-        canvas.drawCircle(position, 1.8, paint);
+
         previous = point;
       }
     }
@@ -282,7 +310,7 @@ class RelativeOverlayPlot extends StatelessWidget {
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
       void inspect(double x) {
-        final fraction = ((x - 54) / math.max(1, constraints.maxWidth - 62))
+        final fraction = ((x - 54) / math.max(1, constraints.maxWidth - 108))
             .clamp(0.0, 1.0);
         onInspect(
           start.add(
@@ -308,7 +336,7 @@ class RelativeOverlayPlot extends StatelessWidget {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              for (final entry in series.entries)
+              for (final (index, entry) in series.entries.indexed)
                 CustomPaint(
                   painter: _HistoryPainter(
                     reduceHistoryPoints(
@@ -324,7 +352,16 @@ class RelativeOverlayPlot extends StatelessWidget {
                     events,
                     colors[entry.key]!,
                     cursor,
-                    '',
+                    index < 2
+                        ? (entry.key == 'HR'
+                              ? 'bpm'
+                              : entry.key == 'RMSSD'
+                              ? 'ms'
+                              : entry.key)
+                        : '',
+                    rightAxis: index == 1,
+                    reserveRightAxis: true,
+                    drawFrame: index == 0,
                   ),
                 ),
             ],

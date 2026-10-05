@@ -540,6 +540,7 @@ class _SessionTimelineScreenState extends State<SessionTimelineScreen> {
               maximum: high + pad,
               yLabel: title,
               colors: {title: Colors.blue},
+              maximumGapSeconds: null,
               events: _data['Markers']?.map((v) => v.$1).toList() ?? [],
             ),
           ),

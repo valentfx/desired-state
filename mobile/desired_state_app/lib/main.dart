@@ -93,11 +93,11 @@ class _SessionHomeState extends State<SessionHome> {
       appBar: AppBar(
         toolbarHeight: 44,
         title: ListenableBuilder(
-          listenable: widget.controller,
+          listenable: Listenable.merge([widget.controller, _view]),
           builder: (context, _) => Text(
             widget.controller.sessionLogger == null
-                ? 'Screens'
-                : '${widget.controller.recordingState == RecordingState.paused ? 'Paused' : 'Recording'} · ${widget.controller.participant}',
+                ? (_view.value.$1 == 1 ? 'Live' : 'Screens')
+                : '${_view.value.$1 == 1 ? 'Live · ' : ''}${widget.controller.recordingState == RecordingState.paused ? 'Paused' : 'Recording'} · ${widget.controller.participant}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
@@ -551,6 +551,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        toolbarHeight: 36,
         title: const Text('Live'),
         actions: [
           IconButton(
@@ -696,7 +697,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
   }
 
   Widget _buildDashboard(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+    padding: const EdgeInsets.fromLTRB(8, 2, 8, 4),
     child: Column(
       children: [
         Expanded(

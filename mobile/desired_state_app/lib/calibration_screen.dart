@@ -30,16 +30,27 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
       final list = await CalibrationStore(widget.controller.directoryProvider)
           .load();
       if (mounted) {
-        setState(
-          () => _saved = list
+        setState(() {
+          _saved = list
               .where(
                 (v) =>
                     v.deviceId == widget.controller.polarId &&
-                    (v.participantId == widget.controller.participantId ||
+                    (widget.controller.participantId == null ||
+                        v.participantId == widget.controller.participantId ||
                         v.participantId == null),
               )
-              .toList(),
-        );
+              .toList();
+          final active = widget.controller.activeCalibration;
+          if (active != null && active.deviceId == widget.controller.polarId) {
+            _name.text = active.name;
+            _positions
+              ..clear()
+              ..addAll({
+                for (final entry in active.positions.entries)
+                  entry.key: List<double>.of(entry.value),
+              });
+          }
+        });
       }
     } catch (e) {
       if (mounted) {
@@ -148,6 +159,11 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
           'Keep the strap in its normal wearing position. Settle into each position, then capture. Back, right and left are required. Upright and prone are optional.',
         ),
         const SizedBox(height: 12),
+        Text(
+          widget.controller.activeCalibration == null
+              ? 'Connect the H10 to restore its saved calibration, or capture a new one.'
+              : 'Using saved calibration: ${widget.controller.activeCalibration!.name}',
+        ),
         TextField(
           controller: _name,
           decoration: const InputDecoration(labelText: 'Calibration name'),
@@ -197,6 +213,7 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
                   : () async {
                       try {
                         await widget.controller.selectCalibration(item);
+                        await _load();
                         if (mounted) {
                           setState(() => _message = 'Selected ${item.name}');
                         }

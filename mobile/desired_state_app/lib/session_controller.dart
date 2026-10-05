@@ -307,24 +307,39 @@ class SessionController extends ChangeNotifier {
 
   Future<void> loadCalibration() async {
     final options = await CalibrationStore(directoryProvider).load();
-    final matches = options
-        .where(
-          (v) =>
-              v.deviceId == polarId &&
-              (v.participantId == participantId || v.participantId == null),
-        )
-        .toList();
-    final personal = matches
-        .where((v) => v.participantId == participantId)
-        .toList();
-    if (matches.isNotEmpty) {
-      await selectCalibration(
-        personal.isNotEmpty ? personal.last : matches.last,
-      );
+    final deviceOptions = options.where((v) => v.deviceId == polarId).toList();
+    PostureCalibration? selected;
+    if (participantId == null) {
+      // Before Record resolves a participant, restore this strap's last-used
+      // reference for preview. An identified participant is matched below.
+      if (deviceOptions.isNotEmpty) {
+        selected = deviceOptions.last;
+      }
     } else {
-      activeCalibration = null;
-      posture = 'Uncalibrated';
+      final personal = deviceOptions
+          .where((v) => v.participantId == participantId)
+          .toList();
+      final local = deviceOptions
+          .where((v) => v.participantId == null)
+          .toList();
+      if (personal.isNotEmpty) {
+        selected = personal.last;
+      } else if (local.isNotEmpty) {
+        selected = local.last;
+      }
     }
+    if (selected?.id != activeCalibration?.id) {
+      if (sessionLogger != null && selected != null) {
+        await sessionLogger!.writeEvent(
+          'posture_calibration_restored',
+          description: jsonEncode(selected.toJson()),
+          flush: true,
+        );
+      }
+      activeCalibration = selected;
+      posture = selected == null ? 'Uncalibrated' : 'Unknown';
+    }
+    _changed();
   }
 
   late final StreamSubscription<H10Acceleration> _accSubscription;

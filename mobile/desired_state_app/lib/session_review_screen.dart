@@ -59,7 +59,9 @@ class _SessionReviewScreenState extends State<SessionReviewScreen> {
         setState(() {
           final full = _range.end == _duration;
           _duration = seconds;
-          if (full) _range = RangeValues(_range.start, seconds);
+          if (full) {
+            _range = RangeValues(_range.start, seconds);
+          }
           _loadReplay();
         });
       }
@@ -159,7 +161,7 @@ class _SessionReviewScreenState extends State<SessionReviewScreen> {
               yLabel: '$title ($unit)',
               colors: colors,
               references: references,
-              showPoints: true,
+              showPoints: false,
               events: [
                 for (final e in widget.session.entry.events)
                   if (e['event'] == 'marked_event' ||
@@ -314,9 +316,13 @@ class _SessionReviewScreenState extends State<SessionReviewScreen> {
         );
       }
     } catch (error) {
-      if (mounted) setState(() => _notice = 'Review not saved: $error');
+      if (mounted) {
+        setState(() => _notice = 'Review not saved: $error');
+      }
     } finally {
-      if (mounted) setState(() => _saving = false);
+      if (mounted) {
+        setState(() => _saving = false);
+      }
     }
   }
 
@@ -383,7 +389,9 @@ class _SessionReviewScreenState extends State<SessionReviewScreen> {
               max: _duration,
               values: _range,
               onChanged: (v) {
-                if (v.end - v.start < .1) return;
+                if (v.end - v.start < .1) {
+                  return;
+                }
                 setState(() => _range = v);
               },
               onChangeEnd: (_) => setState(_loadReplay),
@@ -477,7 +485,9 @@ class _SessionReviewScreenState extends State<SessionReviewScreen> {
                   max: _duration,
                   values: _baseline,
                   onChanged: (v) {
-                    if (v.end - v.start >= .1) setState(() => _baseline = v);
+                    if (v.end - v.start >= .1) {
+                      setState(() => _baseline = v);
+                    }
                   },
                 ),
                 const Text(
@@ -568,7 +578,9 @@ class _SessionReviewScreenState extends State<SessionReviewScreen> {
                     if (replay.hasError) {
                       return Text('Replay failed: ${replay.error}');
                     }
-                    if (!replay.hasData) return const LinearProgressIndicator();
+                    if (!replay.hasData) {
+                      return const LinearProgressIndicator();
+                    }
                     final data = replay.data!;
                     double extent(Map<String, List<(double, double)>> series) =>
                         math.max(
@@ -661,7 +673,9 @@ class _SessionReviewScreenState extends State<SessionReviewScreen> {
     int? previousSegment;
     for (final b in signals.bands) {
       final t = b.frame.time.difference(_origin).inMicroseconds / 1000000;
-      if (t < _range.start || t > _range.end) continue;
+      if (t < _range.start || t > _range.end) {
+        continue;
+      }
       final values = b.frame.values(effectiveChannel, relative: _relative);
       for (final band in series.keys) {
         if (previousSegment != null && previousSegment != b.segment) {

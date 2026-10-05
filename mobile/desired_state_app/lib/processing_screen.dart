@@ -335,31 +335,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                 ),
               ],
             ),
-            Row(
-              children: [
-                IconButton(
-                  tooltip: 'Earlier data',
-                  onPressed: () => navigate(shift: -0.8),
-                  icon: const Icon(Icons.chevron_left),
-                ),
-                IconButton(
-                  tooltip: 'Zoom in',
-                  onPressed: () => navigate(zoom: 0.5),
-                  icon: const Icon(Icons.zoom_in),
-                ),
-                IconButton(
-                  tooltip: 'Zoom out',
-                  onPressed: () => navigate(zoom: 2),
-                  icon: const Icon(Icons.zoom_out),
-                ),
-                IconButton(
-                  tooltip: 'Later data',
-                  onPressed: () => navigate(shift: 0.8),
-                  icon: const Icon(Icons.chevron_right),
-                ),
-              ],
-            ),
-            if (times.length > 1)
+            if (!_follow && times.length > 1)
               SizedBox(
                 height: 30,
                 child: RangeSlider(
@@ -388,10 +364,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                   },
                 ),
               ),
-            const Text(
-              'Relative trends · drag to browse, tap for values',
-              style: TextStyle(fontSize: 12),
-            ),
+
             if (_error != null)
               Text(_error!, maxLines: 2, overflow: TextOverflow.ellipsis),
             Expanded(
@@ -430,7 +403,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
         children: [
           ...widget.header,
           panel(
-            270.0 +
+            310.0 +
                 (summaries.length - 2).clamp(0, 99) * 24 +
                 (MediaQuery.textScalerOf(context).scale(14) - 14) * 12,
           ),
@@ -460,7 +433,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
               const Padding(
                 padding: EdgeInsets.all(12),
                 child: Text(
-                  'Select HRV values in Filters & metrics. Open H10 ECG waveform in Live for the acquired ECG.',
+                  'Select HRV values in Filters & metrics. Open Devices → Polar H10 for the acquired ECG.',
                 ),
               ),
             ],

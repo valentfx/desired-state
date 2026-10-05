@@ -7,6 +7,8 @@ import 'package:desired_state_app/rr_history.dart';
 import 'package:desired_state_app/ecg_live_panel.dart';
 import 'package:desired_state_app/eeg_live_panel.dart';
 import 'package:desired_state_app/compact_eeg_panel.dart';
+import 'package:desired_state_app/eeg_bands.dart';
+import 'package:desired_state_app/calibration_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:desired_state_app/session_preferences.dart';
 import 'package:desired_state_app/session_timeline_screen.dart';
@@ -62,9 +64,65 @@ void main() {
       expect(find.byType(EegLivePanel), findsNothing);
       expect(find.byType(CompactEegPanel), findsOneWidget);
       expect(find.byTooltip('Live settings'), findsOneWidget);
+      expect(find.byTooltip('Earlier data'), findsNothing);
+      expect(find.byTooltip('Later data'), findsNothing);
+      expect(find.byTooltip('Zoom in'), findsNothing);
+      expect(find.byTooltip('Zoom out'), findsNothing);
       expect(c.recordingState, RecordingState.recording);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
+    },
+  );
+  testWidgets(
+    'compact EEG includes Delta with one percent axis and quality gaps',
+    (tester) async {
+      final c = SessionController(
+        service: FakePolar(),
+        foregroundService: FakeForeground(),
+      );
+      try {
+        final now = DateTime.now();
+        c.museAthena.streaming = true;
+        c.museAthena.lastSamplesAt = now;
+        final power = {
+          'Delta': 40.0,
+          'Theta': 30.0,
+          'Alpha': 20.0,
+          'Beta': 10.0,
+        };
+        c.museAthena.bandHistory.add(
+          EegBandFrame(now.subtract(const Duration(seconds: 1)), {
+            '1': power,
+            '2': power,
+          }, 2),
+        );
+        c.museAthena.bandHistory.add(EegBandFrame(now, {'1': power}, 2));
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(body: CompactEegPanel(controller: c)),
+          ),
+        );
+        final painter = tester
+            .widgetList<CustomPaint>(find.byType(CustomPaint))
+            .map((w) => w.painter)
+            .whereType<EegAxisPainter>()
+            .single;
+        expect(
+          painter.series.keys,
+          containsAll(['Delta', 'Theta', 'Alpha', 'Beta']),
+        );
+        expect(painter.maximum, 100);
+        expect(painter.yLabel, '%');
+        expect(painter.showPoints, isFalse);
+        expect(painter.series['Delta']!.first.$2, 40);
+        expect(painter.series.values.every((p) => p.last.$2.isNaN), isTrue);
+        expect(find.text('EEG · poor or stale signal'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      } finally {
+        await tester.pumpWidget(const SizedBox());
+        c.dispose();
+        await tester.pump();
+      }
     },
   );
   test('posture captures reject movement and classify known, ambiguous and unknown orientations', () {
@@ -236,6 +294,102 @@ void main() {
       )).any((v) => v['event'] == 'posture_calibration_selected'),
       isTrue,
     );
+  });
+  test('restart restores participant calibration before Record, then matches explicit identity', () async {
+    final root = await Directory.systemTemp.createTemp('calibration-restart-');
+    addTearDown(() => root.delete(recursive: true));
+    final original = SessionController(
+      service: FakePolar(),
+      foregroundService: FakeForeground(),
+      directoryProvider: () async => root,
+    );
+    await original.connect(BluetoothDevice.fromId('H10'));
+    await original.selectCalibration(
+      PostureCalibration(
+        id: 'saved',
+        deviceId: 'H10',
+        name: 'My strap',
+        participantId: 'person-one',
+        positions: {
+          'On back': [0, 0, 1],
+          'Right side': [1, 0, 0],
+          'Left side': [-1, 0, 0],
+        },
+      ),
+    );
+    original.dispose();
+    await Future<void>.delayed(Duration.zero);
+    final restarted = SessionController(
+      service: FakePolar(),
+      foregroundService: FakeForeground(),
+      directoryProvider: () async => root,
+    );
+    addTearDown(restarted.dispose);
+    await restarted.connect(BluetoothDevice.fromId('H10'));
+    expect(restarted.participantId, isNull);
+    expect(restarted.activeCalibration?.id, 'saved');
+    final file = await CalibrationStore(() async => root).file;
+    final before = await file.readAsString();
+    await restarted.loadCalibration();
+    expect(await file.readAsString(), before);
+    restarted.participantId = 'person-two';
+    await restarted.loadCalibration();
+    expect(restarted.activeCalibration, isNull);
+    restarted.participantId = 'person-one';
+    await restarted.loadCalibration();
+    expect(restarted.activeCalibration?.id, 'saved');
+  });
+  testWidgets('saved calibration fills reference captures when reopened', (
+    tester,
+  ) async {
+    late Directory root;
+    late SessionController c;
+    await tester.runAsync(() async {
+      root = await Directory.systemTemp.createTemp('calibration-reopen-');
+      c = SessionController(
+        service: FakePolar(),
+        foregroundService: FakeForeground(),
+        directoryProvider: () async => root,
+      );
+      await c.connect(BluetoothDevice.fromId('H10'));
+      await c.selectCalibration(
+        PostureCalibration(
+          id: 'saved',
+          deviceId: 'H10',
+          name: 'My strap',
+          positions: {
+            'On back': [0, 0, 1],
+            'Right side': [1, 0, 0],
+            'Left side': [-1, 0, 0],
+          },
+        ),
+      );
+    });
+    addTearDown(
+      () => tester.runAsync(() async {
+        c.dispose();
+        await Future<void>.delayed(Duration.zero);
+        await root.delete(recursive: true);
+      }),
+    );
+    await tester.pumpWidget(
+      MaterialApp(home: CalibrationScreen(controller: c)),
+    );
+    await settleIo(
+      tester,
+      () =>
+          find
+              .text('Using saved calibration: My strap')
+              .evaluate()
+              .isNotEmpty &&
+          find.text('Captured').evaluate().length == 3,
+    );
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).controller!.text,
+      'My strap',
+    );
+    expect(find.text('Captured'), findsNWidgets(3));
+    await tester.pumpWidget(const SizedBox());
   });
   test('timeline reads complete lines incrementally without duplicates and derives RR metrics', () async {
     final root = await Directory.systemTemp.createTemp('timeline-reader-');
