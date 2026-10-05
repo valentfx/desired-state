@@ -11,6 +11,12 @@ import 'session_history.dart';
 import 'app_navigation.dart';
 import 'device_screen.dart';
 import 'overview_screen.dart';
+import 'participant_tools.dart';
+import 'compact_eeg_panel.dart';
+import 'preferences_screen.dart';
+import 'session_timeline_screen.dart';
+import 'session_review_screen.dart';
+import 'settings_screen.dart';
 
 void main() {
   runApp(const DesiredStateApp());
@@ -87,11 +93,11 @@ class _SessionHomeState extends State<SessionHome> {
       appBar: AppBar(
         toolbarHeight: 44,
         title: ListenableBuilder(
-          listenable: widget.controller,
+          listenable: Listenable.merge([widget.controller, _view]),
           builder: (context, _) => Text(
             widget.controller.sessionLogger == null
-                ? 'Screens'
-                : '${widget.controller.recordingState == RecordingState.paused ? 'Paused' : 'Recording'} · ${widget.controller.participant}',
+                ? (_view.value.$1 == 1 ? 'Live' : 'Screens')
+                : '${_view.value.$1 == 1 ? 'Live · ' : ''}${widget.controller.recordingState == RecordingState.paused ? 'Paused' : 'Recording'} · ${widget.controller.participant}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
@@ -111,14 +117,6 @@ class _SessionHomeState extends State<SessionHome> {
                 onTap: () => _select(0),
               ),
               ListTile(
-                leading: const Icon(Icons.person_outline),
-                title: const Text('Participants'),
-                subtitle: const Text(
-                  'Select the viewed participant in Overview',
-                ),
-                onTap: () => _select(0),
-              ),
-              ListTile(
                 leading: const Icon(Icons.monitor_heart_outlined),
                 title: const Text('Live'),
                 onTap: () => _select(1),
@@ -128,18 +126,18 @@ class _SessionHomeState extends State<SessionHome> {
                 title: const Text('Analyze'),
                 onTap: () => _select(2),
               ),
-              const Divider(),
               ListTile(
                 leading: const Icon(Icons.bluetooth),
                 title: const Text('Devices'),
                 onTap: () => _open(DeviceScreen(controller: widget.controller)),
               ),
               ListTile(
-                leading: const Icon(Icons.tune),
-                title: const Text('Processing & plots'),
+                leading: const Icon(Icons.settings_outlined),
+                title: const Text('Settings'),
                 onTap: () =>
-                    _open(ProcessingScreen(controller: widget.controller)),
+                    _open(SettingsScreen(controller: widget.controller)),
               ),
+              const Divider(),
               ListTile(
                 leading: const Icon(Icons.science_outlined),
                 title: const Text('Advanced tools'),
@@ -176,6 +174,7 @@ class _SessionHomeState extends State<SessionHome> {
                   HistoryScreen(
                     controller: widget.controller,
                     revision: selection.$2,
+                    analyze: true,
                     onLive: () => _select(1),
                   ),
                 ],
@@ -205,7 +204,9 @@ class _CollectorScreenState extends State<CollectorScreen> {
   String get _status => _controller.error ?? _controller.status;
   String get _deviceName => _controller.connected || _controller.polarId != null
       ? _controller.deviceName
-      : _controller.ringName;
+      : _controller.ringId != null
+      ? _controller.ringName
+      : 'Muse S Athena';
 
   RecordingState get _recordingState => _controller.recordingState;
 
@@ -223,10 +224,17 @@ class _CollectorScreenState extends State<CollectorScreen> {
     super.initState();
     _controller = widget.controller;
     _controller.addListener(_refresh);
+    _controller.loadUserSettings().catchError((Object error) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
   }
 
   void _refresh() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   void _openDevice() => Navigator.of(context).push(
@@ -253,6 +261,33 @@ class _CollectorScreenState extends State<CollectorScreen> {
                 if (_controller.polarId != null) _accLine(),
                 if (_controller.ringId != null) _ringLine(),
                 const SizedBox(height: 16),
+                ListTile(
+                  leading: const Icon(Icons.dashboard_customize_outlined),
+                  title: const Text('Customize Live'),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          PreferencesScreen(controller: _controller),
+                    ),
+                  ),
+                ),
+                if (_sessionLogger != null)
+                  ListTile(
+                    leading: const Icon(Icons.show_chart),
+                    title: const Text('All session signals'),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => SessionTimelineScreen(
+                          directory: _sessionLogger!.directory,
+                          origin: _controller.sessionStartedAt!,
+                          title: 'Current recording',
+                          controller: _controller,
+                        ),
+                      ),
+                    ),
+                  ),
                 ListTile(
                   leading: const Icon(Icons.history),
                   title: const Text('History'),
@@ -290,27 +325,6 @@ class _CollectorScreenState extends State<CollectorScreen> {
     ),
   );
 
-  Widget _streamStatus() => InkWell(
-    onTap: _openAdvanced,
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (_controller.polarId != null)
-          Text(
-            'H10 · ${_controller.connectionStatus} · HR packet ${_controller.lastDataAge?.inSeconds.toString() ?? '--'}s ago · ACC ${_controller.latestAcceleration != null && DateTime.now().difference(_controller.latestAcceleration!.receivedAt) < const Duration(seconds: 5) && _controller.connected ? 'fresh' : 'no fresh data'}',
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-        if (_controller.ringId != null)
-          Text(
-            'O2Ring · ${_controller.ringStatus.name} · SpO₂ ${_controller.ringDataFresh ? _controller.latestRingReading?.spo2 ?? '--' : '--'}% · ${_controller.ringDataFresh ? 'fresh' : 'no fresh data'}',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Colors.deepPurple),
-          ),
-      ],
-    ),
-  );
   @override
   void dispose() {
     _controller.removeListener(_refresh);
@@ -322,6 +336,43 @@ class _CollectorScreenState extends State<CollectorScreen> {
   }
 
   String _participantName() => _controller.participant;
+  Future<void> _editParticipant() async {
+    final active = _controller.sessionLogger != null;
+    final values = await editParticipant(
+      context,
+      name: active ? _controller.participant : _participantNameController.text,
+      info: _controller.participantInfo,
+      participantId: _controller.participantId,
+      store: ParticipantStore(directoryProvider: _controller.directoryProvider),
+      correction: active,
+    );
+    if (values == null) {
+      return;
+    }
+    try {
+      if (active) {
+        await _controller.editRecordingParticipant(
+          values.$1,
+          values.$2,
+          profileId: values.$3,
+        );
+        _participantNameController.text = values.$1;
+      } else {
+        _participantNameController.text = values.$1;
+        _controller.participantInfo = values.$2;
+        _controller.participantId = values.$3;
+      }
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Participant not saved: $error')),
+        );
+      }
+    }
+  }
 
   Future<void> _markEvent() async {
     await _controller.markEvent(_eventDescriptionController.text);
@@ -329,8 +380,21 @@ class _CollectorScreenState extends State<CollectorScreen> {
   }
 
   Future<void> _startSession() async {
-    await _controller.start(participantName: _participantNameController.text);
-    if (mounted) setState(() => _showConnect = false);
+    await _controller.start(
+      participantName: _participantNameController.text,
+      participantProfileId: _controller.participantId,
+    );
+    if (_controller.sessionLogger != null &&
+        _controller.participantInfo.isNotEmpty) {
+      await _controller.editRecordingParticipant(
+        _controller.participant,
+        _controller.participantInfo,
+        profileId: _controller.participantId,
+      );
+    }
+    if (mounted) {
+      setState(() => _showConnect = false);
+    }
   }
 
   void _pauseSession() => _controller.pause();
@@ -352,7 +416,9 @@ class _CollectorScreenState extends State<CollectorScreen> {
 
   Future<void> _openSessionNotes() async {
     final logger = _sessionLogger ?? _lastSessionLogger;
-    if (logger == null) return;
+    if (logger == null) {
+      return;
+    }
     // Only the owning Live screen edits annotations during recording.
     // History's separate repository retains its active-session write guard.
     final repository = SessionHistoryRepository(
@@ -360,7 +426,9 @@ class _CollectorScreenState extends State<CollectorScreen> {
     );
     try {
       final entry = await repository.readEntry(logger.directory);
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       await Navigator.push(
         context,
         MaterialPageRoute<void>(
@@ -415,9 +483,45 @@ class _CollectorScreenState extends State<CollectorScreen> {
     );
   }
 
+  Future<void> _reviewLastSession() async {
+    final logger = _lastSessionLogger;
+    if (logger == null || _controller.busy) {
+      return;
+    }
+    try {
+      final repository = SessionHistoryRepository(
+        directoryProvider: _controller.directoryProvider,
+        activeSessionId: () => _controller.sessionLogger?.sessionId,
+      );
+      final entry = await repository.readEntry(logger.directory);
+      final session = await repository.open(entry);
+      if (!mounted) {
+        return;
+      }
+      await Navigator.push(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => SessionReviewScreen(
+            session: session,
+            repository: repository,
+            controller: _controller,
+          ),
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not review session: $error')),
+        );
+      }
+    }
+  }
+
   Future<void> _exportLastSession() async {
     final logger = _lastSessionLogger;
-    if (logger == null || _exporting) return;
+    if (logger == null || _exporting) {
+      return;
+    }
     setState(() => _exporting = true);
     try {
       final zip = await logger.createExportZip();
@@ -435,7 +539,9 @@ class _CollectorScreenState extends State<CollectorScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _exporting = false);
+      if (mounted) {
+        setState(() => _exporting = false);
+      }
     }
   }
 
@@ -445,6 +551,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        toolbarHeight: 36,
         title: const Text('Live'),
         actions: [
           IconButton(
@@ -459,12 +566,12 @@ class _CollectorScreenState extends State<CollectorScreen> {
               onPressed: _openSessionNotes,
             ),
           IconButton(
-            tooltip: 'Processing & plots',
+            tooltip: 'Live settings',
             icon: const Icon(Icons.tune),
             onPressed: () => Navigator.push(
               context,
               MaterialPageRoute<void>(
-                builder: (_) => ProcessingScreen(controller: _controller),
+                builder: (_) => PreferencesScreen(controller: _controller),
               ),
             ),
           ),
@@ -505,10 +612,17 @@ class _CollectorScreenState extends State<CollectorScreen> {
       ),
       const SizedBox(height: 4),
       Text(_status),
-      _streamStatus(),
-      if (_controller.polarId != null) _accLine(),
-      if (_controller.ringId != null) _ringLine(),
-      QuickMarkerBar(controller: _controller),
+      Wrap(
+        spacing: 16,
+        children: [
+          Text('BPM ${_controller.heartRate ?? '--'}'),
+          Text('RMSSD ${_controller.rmssd?.toStringAsFixed(1) ?? '--'} ms'),
+          if (_controller.preferences.showOxygen)
+            Text('SpO2 ${_controller.latestRingReading?.spo2 ?? '--'}%'),
+        ],
+      ),
+      if (_controller.preferences.showEeg)
+        CompactEegPanel(controller: _controller),
       if (_lastSessionLogger != null)
         TextButton(
           onPressed: () => setState(() => _showConnect = false),
@@ -517,10 +631,19 @@ class _CollectorScreenState extends State<CollectorScreen> {
       const SizedBox(height: 24),
       TextField(
         controller: _participantNameController,
+        onChanged: (_) {
+          _controller.participantInfo = '';
+          _controller.participantId = null;
+        },
         decoration: const InputDecoration(
           labelText: 'Participant name',
           hintText: 'Optional; blank records as unassigned',
         ),
+      ),
+      TextButton.icon(
+        onPressed: _editParticipant,
+        icon: const Icon(Icons.person_outline),
+        label: const Text('Choose / edit participant'),
       ),
       const SizedBox(height: 12),
       if (_connected) ...[
@@ -535,7 +658,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
         FilledButton.icon(
           onPressed: _openDevice,
           icon: const Icon(Icons.bluetooth),
-          label: const Text('Connect H10'),
+          label: const Text('Connect devices'),
         ),
       ],
     ],
@@ -574,7 +697,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
   }
 
   Widget _buildDashboard(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+    padding: const EdgeInsets.fromLTRB(8, 2, 8, 4),
     child: Column(
       children: [
         Expanded(
@@ -582,51 +705,29 @@ class _CollectorScreenState extends State<CollectorScreen> {
             controller: _controller,
             embedded: true,
             header: [
-              _streamStatus(),
-              if (_controller.polarId != null) _accLine(),
-              if (_controller.ringId != null) _ringLine(),
-              Row(
+              Wrap(
+                spacing: 12,
+                runSpacing: 4,
                 children: [
-                  Icon(
-                    Icons.circle,
-                    size: 10,
-                    color: _recordingState == RecordingState.recording
-                        ? Colors.red
-                        : Colors.amber,
-                  ),
-                  const SizedBox(width: 4),
                   Text(
                     _recordingState == RecordingState.recording
-                        ? 'REC'
+                        ? '● REC'
                         : 'PAUSED',
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      '${_participantName()} | $_deviceName',
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
+                  Text(_participantName()),
                   Text(_formatDuration(_sessionElapsed)),
+                  if (_controller.preferences.showOxygen)
+                    Text(
+                      'SpO2 ${_controller.ringDataFresh ? _controller.latestRingReading?.spo2 ?? '--' : '--'}%',
+                    ),
+                  if (_controller.preferences.showPosture &&
+                      _controller.polarId != null)
+                    Text(_controller.currentPosture),
                 ],
               ),
-              InkWell(
-                onTap: _openDevice,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Text(
-                    '${_controller.connectionStatus} | last data ${_controller.lastDataAge?.inSeconds.toString() ?? '--'}s ago',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ),
-              if (_controller.error != null)
-                Text(
-                  _controller.error!,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
+              if (_controller.preferences.showEeg)
+                CompactEegPanel(controller: _controller),
+              if (_controller.error != null) Text(_controller.error!),
             ],
           ),
         ),
@@ -672,6 +773,11 @@ class _CollectorScreenState extends State<CollectorScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text('Session saved', style: Theme.of(context).textTheme.headlineSmall),
+        FilledButton.icon(
+          onPressed: _controller.busy ? null : _reviewLastSession,
+          icon: const Icon(Icons.analytics_outlined),
+          label: const Text('Review session'),
+        ),
         QuickMarkerBar(controller: _controller),
         const SizedBox(height: 8),
         Text(

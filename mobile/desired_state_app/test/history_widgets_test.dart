@@ -13,17 +13,22 @@ import 'session_controller_test.dart' show FakePolar, FakeForeground, rows;
 import 'session_history_test.dart' show historyFixture, historyStart;
 
 Future<void> settleIo(WidgetTester tester, bool Function() ready) async {
-  for (var i = 0; i < 150; i++) {
+  // Real disk I/O must get wall-clock time; a loading spinner or live
+  // timer must not be used as a global pumpAndSettle completion condition.
+  final clock = Stopwatch()..start();
+  while (clock.elapsed < const Duration(seconds: 10)) {
     await tester.pump(const Duration(milliseconds: 20));
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 10)),
     );
     if (ready()) {
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(ready(), isTrue, reason: 'Loaded/saved state must remain ready');
       return;
     }
   }
-  fail('History screen did not finish loading/saving');
+  fail('UI did not finish loading/saving within 10 seconds of real time');
 }
 
 void main() {
@@ -61,7 +66,10 @@ void main() {
       );
       final rect = tester.getRect(gesture);
       await tester.tapAt(
-        Offset(rect.left + 8 + 2375 / 4999 * (rect.width - 16), rect.center.dy),
+        Offset(
+          rect.left + 54 + 2375 / 4999 * (rect.width - 62),
+          rect.center.dy,
+        ),
       );
       expect(inspected, same(points[2375]));
       await tester.pumpWidget(
@@ -209,25 +217,43 @@ void main() {
   testWidgets(
     'recording survives navigation into history and active session stays read-only',
     (tester) async {
+      debugPrint('Active History: preparing recording');
       late Directory root;
       late SessionController controller;
       final polar = FakePolar();
       await tester.runAsync(() async {
-        root = await Directory.systemTemp.createTemp('recording-history-ui-');
+        root = await Directory.systemTemp
+            .createTemp('recording-history-ui-')
+            .timeout(const Duration(seconds: 10));
+        debugPrint('Active History: creating controller');
         controller = SessionController(
           service: polar,
           foregroundService: FakeForeground(),
           directoryProvider: () async => root,
         );
-        await controller.quickMarkers.load();
-        await controller.connect(BluetoothDevice.fromId('H10'));
-        await controller.start(
-          participantName: 'Recording fixture',
-          description: 'Active fixture',
+        debugPrint('Active History: loading markers');
+        await controller.quickMarkers.load().timeout(
+          const Duration(seconds: 10),
         );
+        debugPrint('Active History: connecting fake H10');
+        await controller
+            .connect(BluetoothDevice.fromId('H10'))
+            .timeout(const Duration(seconds: 10));
+        debugPrint('Active History: starting named recording');
+        await controller
+            .start(
+              participantName: 'Recording fixture',
+              description: 'Active fixture',
+            )
+            .timeout(const Duration(seconds: 15));
+        expect(controller.error, isNull);
+        expect(controller.sessionLogger, isNotNull);
+        debugPrint('Active History: flushing initial marker');
         polar.emit([1000, 1010]);
         // A flushed marker makes the active snapshot available to History.
-        await controller.markQuickMarker(controller.quickMarkers.items.first);
+        await controller
+            .markQuickMarker(controller.quickMarkers.items.first)
+            .timeout(const Duration(seconds: 10));
       });
       final logger = controller.sessionLogger!;
       addTearDown(() async {
@@ -238,16 +264,27 @@ void main() {
           await root.delete(recursive: true);
         });
       });
+      debugPrint('Active History: opening Live');
       await tester.pumpWidget(
         MaterialApp(home: CollectorScreen(controller: controller)),
       );
+      await settleIo(
+        tester,
+        () => find.byTooltip('Live settings').evaluate().isNotEmpty,
+      );
+      debugPrint('Active History: opening advanced tools');
       await tester.tap(find.byTooltip('Advanced tools'));
-      await tester.pumpAndSettle();
+      await settleIo(
+        tester,
+        () => find.text('Advanced live tools').evaluate().isNotEmpty,
+      );
+      debugPrint('Active History: loading session list');
       await tester.tap(find.text('History'));
       await settleIo(
         tester,
         () => find.textContaining('Active fixture').evaluate().isNotEmpty,
       );
+      debugPrint('Active History: opening active snapshot');
       polar.emit([1020]);
       await tester.tap(find.textContaining('Active fixture'));
       await settleIo(
@@ -271,13 +308,23 @@ void main() {
             .onPressed,
         isNull,
       );
+      debugPrint('Active History: returning to Live');
       polar.emit([1030]);
-      await tester.tap(find.text('Live'));
-      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(RecordingHistoryBanner),
+          matching: find.text('Live'),
+        ),
+      );
+      await settleIo(
+        tester,
+        () => find.byTooltip('Stop recording').evaluate().isNotEmpty,
+      );
       expect(find.byType(CollectorScreen), findsOneWidget);
       expect(controller.sessionLogger, same(logger));
       expect(controller.rrHistory.raw, [1000, 1010, 1020, 1030]);
       expect(controller.recordingState, RecordingState.recording);
+      debugPrint('Active History: stopping and verifying four RR rows');
       await tester.runAsync(() async {
         await controller.stop();
         expect((await rows(logger.directory, 'rr')).length, 4);

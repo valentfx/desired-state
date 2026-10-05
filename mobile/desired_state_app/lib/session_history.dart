@@ -12,11 +12,20 @@ typedef JsonRow = Map<String, dynamic>;
 
 /// Dates are inclusive local calendar days; identity remains the saved snapshot.
 class HistoryFilter {
-  const HistoryFilter({this.user, this.identifier = '', this.from, this.to});
-  final String? user;
+  const HistoryFilter({
+    this.participantId,
+    this.user,
+    this.identifier = '',
+    this.from,
+    this.to,
+  });
+  final String? user, participantId;
   final String identifier;
   final DateTime? from, to;
   bool matches(HistoryEntry entry) {
+    if (participantId != null && entry.participantId != participantId) {
+      return false;
+    }
     if (user != null && entry.participant != user) return false;
     final id = identifier.trim().toLowerCase();
     if (id.isNotEmpty &&
@@ -46,12 +55,20 @@ class HistoryMetadata {
     required this.notes,
     required this.tags,
     Map<String, String>? eventNotes,
+    this.participantName,
+    this.participantId,
+    this.userInfo = '',
   }) : eventNotes = eventNotes ?? {};
+  final String? participantName, participantId;
+  final String userInfo;
   final String description;
   final String notes;
   final List<String> tags;
   final Map<String, String> eventNotes;
   JsonRow toJson() => {
+    'participant_name': ?participantName,
+    'participant_id': ?participantId,
+    'user_info': userInfo,
     'description': description,
     'notes': notes,
     'outcome_tags': tags,
@@ -65,6 +82,9 @@ class HistoryMetadata {
       throw const FormatException('Invalid annotation metadata');
     }
     return HistoryMetadata(
+      participantName: row['participant_name'] as String?,
+      participantId: row['participant_id'] as String?,
+      userInfo: row['user_info'] as String? ?? '',
       description: row['description'] as String,
       notes: row['notes'] as String,
       tags: List<String>.from(row['outcome_tags'] as List),
@@ -95,9 +115,23 @@ class HistoryEntry {
   String get id =>
       manifest['session_id']?.toString() ??
       directory.uri.pathSegments.where((s) => s.isNotEmpty).last;
-  String get participant => (manifest['assignments'] is Map)
+  String? get participantId => metadata.participantName != null
+      ? metadata.participantId
+      : manifest['participant_id'] is String
+      ? manifest['participant_id'] as String
+      : null;
+  String get participant => metadata.participantName ?? originalParticipant;
+  String get originalParticipant => (manifest['assignments'] is Map)
       ? (manifest['assignments'] as Map).values.toSet().join(', ')
       : 'Unknown participant';
+  Map<String, dynamic> get displayManifest => {
+    ...manifest,
+    if (metadata.participantName != null && manifest['assignments'] is Map)
+      'assignments': {
+        for (final key in (manifest['assignments'] as Map).keys)
+          key.toString(): metadata.participantName,
+      },
+  };
   String get device => (manifest['assignments'] is Map)
       ? (manifest['assignments'] as Map).keys.join(', ')
       : 'Unknown device';
@@ -145,10 +179,14 @@ class HistorySession {
     this.rr,
     this.warnings, {
     this.oxygen = const [],
+    this.eegSamples = 0,
+    this.ecgSamples = 0,
     this.accelerationSamples = 0,
     this.accelerationPackets = 0,
   });
   final List<JsonRow> oxygen;
+  final int eegSamples;
+  final int ecgSamples;
   final int accelerationSamples;
   final int accelerationPackets;
   final HistoryEntry entry;
@@ -439,6 +477,51 @@ class SessionHistoryRepository {
       warnings,
     );
     final acceleration = await _accSummary(entry, warnings);
+    var eegSamples = 0;
+    final eegFile = File('${entry.directory.path}/muse_eeg.jsonl');
+    if (await eegFile.exists()) {
+      await for (final line
+          in eegFile
+              .openRead()
+              .transform(utf8.decoder)
+              .transform(const LineSplitter())) {
+        try {
+          final row = jsonDecode(line);
+          if (row is Map<String, dynamic> &&
+              _belongs(row, entry) &&
+              row['eegCount'] is int) {
+            eegSamples += row['eegCount'] as int;
+          } else {
+            warnings.add('Malformed EEG batch omitted');
+          }
+        } catch (_) {
+          warnings.add('Unreadable EEG batch omitted');
+        }
+      }
+    }
+    var ecgSamples = 0;
+    final ecgFile = File('${entry.directory.path}/h10_ecg.jsonl');
+    if (await ecgFile.exists()) {
+      await for (final line
+          in ecgFile
+              .openRead()
+              .transform(utf8.decoder)
+              .transform(const LineSplitter())) {
+        try {
+          final row = jsonDecode(line);
+          if (row is Map<String, dynamic> &&
+              _belongs(row, entry) &&
+              row['sample_count'] is int &&
+              row['sample_count'] > 0) {
+            ecgSamples += row['sample_count'] as int;
+          } else {
+            warnings.add('Malformed ECG batch omitted');
+          }
+        } catch (_) {
+          warnings.add('Unreadable ECG batch omitted');
+        }
+      }
+    }
     List<JsonRow> valid(List<JsonRow> rows) => rows.where((row) {
       final ok =
           _belongs(row, entry) &&
@@ -453,6 +536,8 @@ class SessionHistoryRepository {
       rr,
       warnings.toSet().toList(),
       oxygen: validOxygen,
+      eegSamples: eegSamples,
+      ecgSamples: ecgSamples,
       accelerationSamples: acceleration.$1,
       accelerationPackets: acceleration.$2,
     );
@@ -582,6 +667,44 @@ class SessionHistoryRepository {
     final latest = await readEntry(entry.directory);
     await _checkWritable(latest);
     return exportSessionDirectory(entry.directory);
+  });
+
+  Future<void> recordAnalysisReview(
+    HistoryEntry entry,
+    JsonRow review,
+  ) => _serial(() async {
+    await _checkWritable(await readEntry(entry.directory));
+    final file = File('${entry.directory.path}/analysis_reviews.jsonl');
+    if (await FileSystemEntity.type(file.path, followLinks: false) ==
+        FileSystemEntityType.link) {
+      throw StateError('Linked analysis journals are not supported');
+    }
+    final warnings = <String>[];
+    final previous = await _rows(entry.directory, 'analysis_reviews', warnings);
+    if (warnings.isNotEmpty ||
+        previous.any(
+          (r) => r['schema_version'] != 1 || r['session_id'] != entry.id,
+        )) {
+      throw StateError('Unreadable analysis journal; original preserved');
+    }
+    final sources = <String, dynamic>{};
+    for (final name in ['rr', 'measurements', 'muse_eeg', 'h10_ecg']) {
+      final source = File('${entry.directory.path}/$name.jsonl');
+      if (await FileSystemEntity.type(source.path, followLinks: false) !=
+          FileSystemEntityType.file) {
+        continue;
+      }
+      final stat = await source.stat();
+      sources[name] = {
+        'bytes': stat.size,
+        'modified_utc': stat.modified.toUtc().toIso8601String(),
+      };
+    }
+    await file.writeAsString(
+      '${jsonEncode({'schema_version': 1, 'session_id': entry.id, 'saved_utc': DateTime.now().toUtc().toIso8601String(), 'source_files': sources, 'review': review})}\n',
+      mode: FileMode.append,
+      flush: true,
+    );
   });
 
   Future<void> recordProcessingView(

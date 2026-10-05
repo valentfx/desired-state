@@ -95,7 +95,7 @@ class _OverviewScreenState extends State<OverviewScreen> {
   }
 
   String? _singleUser(HistoryEntry entry) =>
-      overviewParticipant(entry.manifest);
+      overviewParticipant(entry.displayManifest);
 
   void _devices() => Navigator.push(
     context,

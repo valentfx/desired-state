@@ -20,10 +20,23 @@ void main() {
       await tester.pump();
       expect(find.text('Desired State'), findsOneWidget);
       expect(find.text('Scan for devices'), findsNothing);
-      await tester.tap(find.text('Connect H10'));
+      await tester.tap(find.text('Connect devices'));
       await tester.pumpAndSettle();
       expect(find.text('Devices'), findsOneWidget);
-      expect(find.text('Scan for devices'), findsOneWidget);
+      expect(find.text('Polar H10'), findsOneWidget);
+      expect(find.text('O2Ring'), findsOneWidget);
+      expect(find.text('Scan for Polar H10'), findsNothing);
+      await tester.tap(find.text('Polar H10').hitTestable());
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('Scan for Polar H10').hitTestable(), findsOneWidget);
+      await tester.tap(find.byType(BackButton).hitTestable());
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.tap(find.text('O2Ring').hitTestable());
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('Scan for O2Ring').hitTestable(), findsOneWidget);
       expect(find.text('START RECORDING'), findsNothing);
       await tester.pumpWidget(const SizedBox());
     },

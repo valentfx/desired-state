@@ -56,7 +56,9 @@ class RrHistory {
     var pairs = 0;
     var sumSquares = 0.0;
     for (var i = start; i < _raw.length; i++) {
-      if (!_accepted[i]) continue;
+      if (!_accepted[i]) {
+        continue;
+      }
       acceptedCount++;
       if (i > start && _accepted[i - 1] && !_breaks.contains(i)) {
         final difference = _raw[i] - _raw[i - 1];
@@ -69,6 +71,34 @@ class RrHistory {
 
   /// A recording pause is not a successive heartbeat pair.
   void breakSequence() => _breaks.add(_raw.length);
+
+  /// Bound a diagnostic preview while retaining adjacency and screening state.
+  /// Session histories do not call this; their raw acquisition rows stay intact.
+  void retainLatest(int count) {
+    if (count < 60) {
+      throw ArgumentError('Keep at least 60 intervals');
+    }
+    final remove = _raw.length - count;
+    if (remove <= 0) {
+      return;
+    }
+    final breaks = _breaks
+        .where((index) => index >= remove)
+        .map((index) => index - remove)
+        .toList();
+    _raw.removeRange(0, remove);
+    _accepted.removeRange(0, remove);
+    _breaks
+      ..clear()
+      ..addAll(breaks);
+    _clean
+      ..clear()
+      ..addAll([
+        for (var i = 0; i < _raw.length; i++)
+          if (_accepted[i]) _raw[i],
+      ]);
+    _artifactCount = _accepted.where((value) => !value).length;
+  }
 
   void clear() {
     _raw.clear();

@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'session_archive.dart';
 import 'device_models.dart';
 import 'h10_accelerometer.dart';
+import 'h10_ecg.dart';
 
 class SessionLogger {
   SessionLogger._(
@@ -26,12 +27,14 @@ class SessionLogger {
   Timer? _flushTimer;
   int _pendingRows = 0;
   bool _closed = false;
+  DateTime? stoppedAt;
 
   static Future<SessionLogger> start({
     required String polarId,
     required String deviceName,
     required String participantName,
     String description = '',
+    String? participantId,
     Future<Directory> Function()? directoryProvider,
     DateTime? startedAt,
     Map<String, dynamic>? additionalDevices,
@@ -56,6 +59,7 @@ class SessionLogger {
       'schema_version': 1,
       'session_id': id,
       'source': 'desired_state_flutter',
+      'participant_id': ?participantId,
       'description': description.trim(),
       'rr_processing': 'mobile-median9-25pct-300-2000-v1',
       'continuity_version': 1,
@@ -65,6 +69,8 @@ class SessionLogger {
         for (final id in (additionalDevices ?? {}).keys) id: participantName,
       },
       'auxiliary_streams_version': 1,
+      'h10_ecg_stream_version': 1,
+      'h10_ecg_units': 'microvolt',
       'h10_accelerometer_stream_version': 1,
       'h10_accelerometer_units': 'milli_g',
       'timestamp_provenance': 'host_receipt_utc',
@@ -86,6 +92,45 @@ class SessionLogger {
     );
     await logger.writeEvent('session_started');
     return logger;
+  }
+
+  /// Attach a previously absent sensor without replacing the primary identity.
+  Future<void> registerDevice({
+    required String deviceId,
+    required String name,
+    required String kind,
+  }) {
+    if (_closed) {
+      throw StateError('Session has already stopped');
+    }
+    return _enqueue(() async {
+      final file = File('${directory.path}/manifest.json');
+      final manifest =
+          jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+      final devices = Map<String, dynamic>.from(manifest['devices'] as Map);
+      if (devices.containsKey(deviceId)) {
+        return;
+      }
+      devices[deviceId] = {'name': name, 'kind': kind};
+      final assignments = Map<String, dynamic>.from(
+        manifest['assignments'] as Map,
+      );
+      assignments[deviceId] = participantName;
+      manifest['devices'] = devices;
+      manifest['assignments'] = assignments;
+      await _writeJson('manifest.json', manifest);
+      await _appendJsonl('events', {
+        'session_id': sessionId,
+        'polar_id': polarId,
+        'user_id': participantName,
+        'event': 'device_attached',
+        'received_utc': DateTime.now().toUtc().toIso8601String(),
+        'device_id': deviceId,
+        'sensor_kind': kind,
+        'description': name,
+      });
+      await _flushSinks();
+    });
   }
 
   Future<void> logMeasurement({
@@ -124,6 +169,20 @@ class SessionLogger {
       }
     });
   }
+
+  Future<void> logEcg({
+    required String deviceId,
+    required H10EcgFrame frame,
+    required int segment,
+  }) => _enqueue(
+    () => _appendJsonl('h10_ecg', {
+      ...frame.toJson(),
+      'session_id': sessionId,
+      'polar_id': deviceId,
+      'user_id': participantName,
+      'continuity_segment': segment,
+    }),
+  );
 
   Future<void> logAcceleration({
     required String deviceId,
@@ -202,6 +261,31 @@ class SessionLogger {
     }),
   );
 
+  Future<void> logMuseBatch(Map<String, dynamic> batch) => _enqueue(
+    () => _appendJsonl('muse_eeg', {
+      'schema_version': 1,
+      'session_id': sessionId,
+      'user_id': participantName,
+      'device_id': 'MUSE_ATHENA',
+      'sensor_kind': 'muse_s_athena',
+      'timestamp_provenance': 'brainflow_timestamps_and_host_receipt_utc',
+      'eeg_units': 'microvolt',
+      ...batch,
+    }),
+  );
+
+  Future<void> logEegBands(Map<String, dynamic> frame) => _enqueue(
+    () => _appendJsonl('muse_bands', {
+      ...frame,
+      'schema_version': 1,
+      'session_id': sessionId,
+      'user_id': participantName,
+      'device_id': 'MUSE_ATHENA',
+      'units': 'microvolt_squared',
+      'method': 'hann_periodogram_1_30hz_v1',
+    }),
+  );
+
   Future<void> writeEvent(
     String event, {
     String? description,
@@ -227,14 +311,18 @@ class SessionLogger {
         if (description != null && description.trim().isNotEmpty)
           'description': description.trim(),
       });
-      if (flush) await _flushSinks();
+      if (flush) {
+        await _flushSinks();
+      }
     });
   }
 
   /// Append-only annotations can be added after Stop without reopening raw sinks.
   Future<void> addMarkerNote(String eventId, String note) {
     final timestamp = DateTime.now().toUtc().toIso8601String();
-    if (note.trim().isEmpty) throw ArgumentError('Enter a note');
+    if (note.trim().isEmpty) {
+      throw ArgumentError('Enter a note');
+    }
     final row = {
       'schema_version': 1,
       'event': 'marker_note_added',
@@ -259,9 +347,14 @@ class SessionLogger {
     return operation;
   }
 
+  Future<void> flush() => _enqueue(_flushSinks);
+
   Future<void> close() async {
-    if (_closed) return;
+    if (_closed) {
+      return;
+    }
     _closed = true;
+    stoppedAt = DateTime.now().toUtc();
     _flushTimer?.cancel();
     await writeEvent('session_ended');
     await _writes;
@@ -300,7 +393,10 @@ class SessionLogger {
       'o2ring_measurements',
       'o2ring_raw',
       'h10_accelerometer',
+      'h10_ecg',
       'h10_pmd_raw',
+      'muse_eeg',
+      'muse_bands',
     ]) {
       _sinks[stream] = File(
         '${directory.path}${Platform.pathSeparator}$stream.jsonl',
@@ -309,7 +405,9 @@ class SessionLogger {
   }
 
   Future<void> _flushSinks() async {
-    if (_sinks.isEmpty || _pendingRows == 0) return;
+    if (_sinks.isEmpty || _pendingRows == 0) {
+      return;
+    }
     await Future.wait(_sinks.values.map((sink) => sink.flush()));
     _pendingRows = 0;
   }

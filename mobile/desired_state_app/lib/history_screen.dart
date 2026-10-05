@@ -4,22 +4,30 @@ import 'package:share_plus/share_plus.dart';
 import 'history_plot.dart';
 import 'session_controller.dart';
 import 'session_history.dart';
+import 'participant_tools.dart';
 import 'processing_screen.dart';
+import 'session_review_screen.dart';
+import 'session_timeline_screen.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({
     super.key,
     required this.controller,
     this.repository,
+    this.participantStore,
     this.home = false,
     this.revision = 0,
     this.onLive,
+    this.initialParticipantId,
+    this.analyze = false,
   });
-  final bool home;
+  final bool home, analyze;
+  final String? initialParticipantId;
   final int revision;
   final VoidCallback? onLive;
   final SessionController controller;
   final SessionHistoryRepository? repository;
+  final ParticipantStore? participantStore;
   @override
   State<HistoryScreen> createState() => _HistoryScreenState();
 }
@@ -31,7 +39,33 @@ class _HistoryScreenState extends State<HistoryScreen> {
         directoryProvider: widget.controller.directoryProvider,
         activeSessionId: () => widget.controller.sessionLogger?.sessionId,
       );
-  late Future<List<HistoryEntry>> _sessions = repository.list();
+  Map<String, ParticipantProfile> _profiles = {};
+  String? _profileError;
+  late Future<List<HistoryEntry>> _sessions = _load();
+  late String? _participantId = widget.initialParticipantId;
+  Future<List<HistoryEntry>> _load() async {
+    try {
+      _profiles =
+          await (widget.participantStore ??
+                  ParticipantStore(
+                    directoryProvider: widget.controller.directoryProvider,
+                  ))
+              .profiles();
+      _profileError = null;
+    } catch (error) {
+      _profiles = {};
+      _profileError =
+          'Profile directory unavailable: $error. Recorded sessions remain accessible.';
+    }
+    final entries = await repository.list();
+    return entries;
+  }
+
+  String _label(HistoryEntry entry) =>
+      _profiles[entry.participantId]?.name ?? entry.participant;
+  String get _filterLabel => _participantId != null
+      ? _profiles[_participantId]?.name ?? _participantId!
+      : _user ?? 'All participants';
   String _query = '';
   final _search = TextEditingController();
   String? _user;
@@ -40,7 +74,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
   @override
   void didUpdateWidget(covariant HistoryScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.revision != oldWidget.revision) _refresh();
+    if (widget.revision != oldWidget.revision) {
+      _refresh();
+    }
   }
 
   @override
@@ -57,16 +93,24 @@ class _HistoryScreenState extends State<HistoryScreen> {
       lastDate: DateTime(2200),
       initialDateRange: _dates,
     );
-    if (range != null && mounted) setState(() => _dates = range);
+    if (range != null && mounted) {
+      setState(() => _dates = range);
+    }
   }
 
   void _refresh() => setState(() {
-    _sessions = repository.list();
+    _sessions = _load();
   });
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
-      title: Text(widget.home ? 'Users & History' : 'History'),
+      title: Text(
+        widget.analyze
+            ? 'Analyze'
+            : widget.home
+            ? 'Users & History'
+            : 'History',
+      ),
       actions: [
         IconButton(
           tooltip: 'Session storage diagnostics',
@@ -78,7 +122,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
             } catch (error) {
               report = 'Storage inspection failed: $error';
             }
-            if (!context.mounted) return;
+            if (!context.mounted) {
+              return;
+            }
             await showDialog<void>(
               context: context,
               builder: (context) => AlertDialog(
@@ -135,24 +181,39 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   return const Center(child: CircularProgressIndicator());
                 }
                 final filter = HistoryFilter(
+                  participantId: _participantId,
                   user: _user,
                   identifier: _identifier.text,
                   from: _dates?.start,
                   to: _dates?.end,
                 );
                 final users = {
-                  ...snapshot.data!.map((e) => e.participant),
+                  ...snapshot.data!
+                      .where((e) => e.participantId == null)
+                      .map((e) => e.participant),
                   ?_user,
                 }.toList()..sort();
+                final profileIds = {
+                  ...snapshot.data!
+                      .map((e) => e.participantId)
+                      .whereType<String>(),
+                  ?_participantId,
+                };
                 final entries = snapshot.data!
                     .where(filter.matches)
+                    .where(
+                      (entry) => _user == null || entry.participantId == null,
+                    )
                     .where(
                       (entry) => [
                         entry.id,
                         entry.participant,
+                        _label(entry),
+                        entry.participantId ?? '',
                         entry.device,
                         entry.metadata.description,
                         entry.metadata.notes,
+                        entry.metadata.userInfo,
                         ...entry.metadata.tags,
                         ...entry.metadata.eventNotes.values,
                         ...entry.events.map(
@@ -167,34 +228,71 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   itemBuilder: (context, index) {
                     if (index == 0) {
                       return ExpansionTile(
-                        title: const Text('Filter by user, ID, date'),
+                        initiallyExpanded:
+                            widget.analyze ||
+                            widget.initialParticipantId != null,
+                        title: const Text('Filter by participant, ID, date'),
                         subtitle: Text(
-                          '${_user ?? 'All users'} · ${_dates == null ? 'All dates' : '${_dates!.start.toLocal().toString().split(' ').first} to ${_dates!.end.toLocal().toString().split(' ').first}'} · ${entries.length} sessions',
+                          '$_filterLabel · ${_dates == null ? 'All dates' : '${_dates!.start.toLocal().toString().split(' ').first} to ${_dates!.end.toLocal().toString().split(' ').first}'} · ${entries.length} sessions',
                         ),
                         children: [
+                          if (_profileError != null)
+                            Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Text(_profileError!),
+                            ),
                           Padding(
                             padding: const EdgeInsets.all(12),
                             child: Column(
                               children: [
                                 DropdownButton<String>(
                                   isExpanded: true,
-                                  value: _user ?? '',
+                                  value: _participantId != null
+                                      ? 'profile:$_participantId'
+                                      : _user != null
+                                      ? 'legacy:$_user'
+                                      : '',
                                   items: [
                                     const DropdownMenuItem(
                                       value: '',
-                                      child: Text('All users'),
+                                      child: Text('All participants'),
                                     ),
+                                    for (final profile in _profiles.values)
+                                      DropdownMenuItem(
+                                        value: 'profile:${profile.id}',
+                                        child: Text(
+                                          '${profile.name} · ${profile.id.substring(profile.id.length > 8 ? profile.id.length - 8 : 0)}',
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    for (final id in profileIds)
+                                      if (!_profiles.containsKey(id))
+                                        DropdownMenuItem(
+                                          value: 'profile:$id',
+                                          child: Text('Missing profile · $id'),
+                                        ),
                                     for (final user in users.where(
                                       (u) => u.isNotEmpty,
                                     ))
                                       DropdownMenuItem(
-                                        value: user,
-                                        child: Text(user),
+                                        value: 'legacy:$user',
+                                        child: Text(
+                                          'Legacy / unassigned ID: $user',
+                                        ),
                                       ),
                                   ],
-                                  onChanged: (value) => setState(
-                                    () => _user = value == '' ? null : value,
-                                  ),
+                                  onChanged: (value) => setState(() {
+                                    _participantId =
+                                        value != null &&
+                                            value.startsWith('profile:')
+                                        ? value.substring(8)
+                                        : null;
+                                    _user =
+                                        value != null &&
+                                            value.startsWith('legacy:')
+                                        ? value.substring(7)
+                                        : null;
+                                  }),
                                 ),
                                 TextField(
                                   controller: _identifier,
@@ -214,6 +312,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                     TextButton(
                                       onPressed: () => setState(() {
                                         _user = null;
+                                        _participantId = null;
                                         _dates = null;
                                         _identifier.clear();
                                         _search.clear();
@@ -243,10 +342,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     return ListTile(
                       isThreeLine: true,
                       title: Text(
-                        '${entry.participant} · ${entry.started?.toLocal() ?? entry.id}',
+                        '${_label(entry)} · ${entry.started?.toLocal() ?? entry.id}',
                       ),
                       subtitle: Text(
-                        '$state · ${entry.device}\n${entry.metadata.description.isEmpty ? entry.id : entry.metadata.description}${entry.warnings.isEmpty ? '' : '\n${entry.warnings.first}'}',
+                        '$state · ${entry.device}${_label(entry) == entry.participant ? '' : ' · recorded as ${entry.participant}'}\n${entry.metadata.description.isEmpty ? entry.id : entry.metadata.description}${entry.warnings.isEmpty ? '' : '\n${entry.warnings.first}'}',
                       ),
                       trailing: const Icon(Icons.chevron_right),
                       onTap: !entry.readable
@@ -263,7 +362,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                   ),
                                 ),
                               );
-                              if (mounted) _refresh();
+                              if (mounted) {
+                                _refresh();
+                              }
                             },
                     );
                   },
@@ -289,7 +390,9 @@ class RecordingHistoryBanner extends StatelessWidget {
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: controller,
     builder: (context, _) {
-      if (controller.sessionLogger == null) return const SizedBox.shrink();
+      if (controller.sessionLogger == null) {
+        return const SizedBox.shrink();
+      }
       return Material(
         color: Theme.of(context).colorScheme.secondaryContainer,
         child: ListTile(
@@ -297,11 +400,30 @@ class RecordingHistoryBanner extends StatelessWidget {
           title: Text(
             '${controller.recordingState == RecordingState.paused ? 'Paused' : 'Recording continues'} · ${controller.connectionStatus}',
           ),
-          trailing: TextButton(
-            onPressed:
-                onLive ??
-                () => Navigator.popUntil(context, (route) => route.isFirst),
-            child: const Text('Live'),
+          trailing: Wrap(
+            spacing: 4,
+            children: [
+              TextButton(
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => SessionTimelineScreen(
+                      directory: controller.sessionLogger!.directory,
+                      origin: controller.sessionStartedAt!,
+                      title: 'Current recording',
+                      controller: controller,
+                    ),
+                  ),
+                ),
+                child: const Text('Signals'),
+              ),
+              TextButton(
+                onPressed:
+                    onLive ??
+                    () => Navigator.popUntil(context, (route) => route.isFirst),
+                child: const Text('Live'),
+              ),
+            ],
           ),
         ),
       );
@@ -346,7 +468,9 @@ class _HistoryDetailScreenState extends State<HistoryDetailScreen> {
         ),
       ),
     );
-    if (mounted) _reload();
+    if (mounted) {
+      _reload();
+    }
   }
 
   Future<void> _export(HistoryEntry entry) async {
@@ -365,7 +489,9 @@ class _HistoryDetailScreenState extends State<HistoryDetailScreen> {
             .showSnackBar(SnackBar(content: Text('Could not export: $error')));
       }
     } finally {
-      if (mounted) setState(() => _exporting = false);
+      if (mounted) {
+        setState(() => _exporting = false);
+      }
     }
   }
 
@@ -380,7 +506,9 @@ class _HistoryDetailScreenState extends State<HistoryDetailScreen> {
           onPressed: () async {
             try {
               final session = await _loading;
-              if (!context.mounted) return;
+              if (!context.mounted) {
+                return;
+              }
               await Navigator.push(
                 context,
                 MaterialPageRoute<void>(
@@ -456,6 +584,47 @@ class _HistoryDetailScreenState extends State<HistoryDetailScreen> {
                 return ListView(
                   padding: const EdgeInsets.all(12),
                   children: [
+                    if (!active)
+                      FilledButton.icon(
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute<void>(
+                            builder: (_) => SessionReviewScreen(
+                              session: session,
+                              repository: widget.repository,
+                              controller: widget.controller,
+                              onLive: widget.onLive,
+                            ),
+                          ),
+                        ),
+                        icon: const Icon(Icons.analytics_outlined),
+                        label: const Text('Review session'),
+                      ),
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.show_chart),
+                      label: const Text('All session signals'),
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => SessionTimelineScreen(
+                            directory: entry.directory,
+                            origin: entry.started ?? DateTime(1970),
+                            end: entry.events
+                                .map(
+                                  (e) =>
+                                      DateTime.tryParse('${e['received_utc']}'),
+                                )
+                                .whereType<DateTime>()
+                                .fold<DateTime?>(
+                                  null,
+                                  (a, b) => a == null || b.isAfter(a) ? b : a,
+                                ),
+                            title: 'Session signals',
+                            controller: widget.controller,
+                          ),
+                        ),
+                      ),
+                    ),
                     Text(
                       entry.participant,
                       style: Theme.of(context).textTheme.titleLarge,
@@ -463,10 +632,58 @@ class _HistoryDetailScreenState extends State<HistoryDetailScreen> {
                     Text(
                       '${entry.started?.toLocal() ?? 'Unknown start'} · ${entry.device}',
                     ),
+                    if (entry.metadata.userInfo.isNotEmpty)
+                      Text(entry.metadata.userInfo),
+                    OutlinedButton.icon(
+                      onPressed: canEdit
+                          ? () async {
+                              final values = await editParticipant(
+                                context,
+                                participantId: entry.participantId,
+                                name: entry.participant,
+                                info: entry.metadata.userInfo,
+                                store: ParticipantStore(
+                                  directoryProvider:
+                                      widget.controller.directoryProvider,
+                                ),
+                                correction: true,
+                              );
+                              if (values == null) {
+                                return;
+                              }
+                              try {
+                                await widget.repository.saveMetadata(
+                                  entry,
+                                  participantMetadata(
+                                    entry.metadata,
+                                    values.$1,
+                                    values.$2,
+                                    participantId: values.$3,
+                                  ),
+                                );
+                                if (mounted) {
+                                  _reload();
+                                }
+                              } catch (error) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        'Participant not saved: $error',
+                                      ),
+                                    ),
+                                  );
+                                }
+                              }
+                            }
+                          : null,
+                      icon: const Icon(Icons.person_outline),
+                      label: const Text('Assign / edit participant'),
+                    ),
                     SelectableText(entry.id),
                     Text(
                       'O2Ring: ${session.oxygen.length} readings · '
-                      'H10 ACC: ${session.accelerationSamples} samples',
+                      'H10 ACC: ${session.accelerationSamples} samples · EEG: ${session.eegSamples} samples · ECG: ${session.ecgSamples} samples',
                     ),
                     Text(
                       active
@@ -749,7 +966,9 @@ class _HistoryMetadataEditorState extends State<HistoryMetadataEditor> {
   }
 
   Future<void> _save() async {
-    if (_saving) return;
+    if (_saving) {
+      return;
+    }
     setState(() {
       _saving = true;
       _error = null;
@@ -766,6 +985,9 @@ class _HistoryMetadataEditorState extends State<HistoryMetadataEditor> {
       }
       final old = widget.entry.metadata;
       final values = HistoryMetadata(
+        participantName: old.participantName,
+        participantId: old.participantId,
+        userInfo: old.userInfo,
         description: _description.text.trim(),
         notes: widget.eventId == null ? _notes.text.trim() : old.notes,
         tags: tags,
@@ -775,11 +997,17 @@ class _HistoryMetadataEditorState extends State<HistoryMetadataEditor> {
         },
       );
       await widget.repository.saveMetadata(widget.entry, values);
-      if (mounted) Navigator.pop(context);
+      if (mounted) {
+        Navigator.pop(context);
+      }
     } catch (error) {
-      if (mounted) setState(() => _error = '$error');
+      if (mounted) {
+        setState(() => _error = '$error');
+      }
     } finally {
-      if (mounted) setState(() => _saving = false);
+      if (mounted) {
+        setState(() => _saving = false);
+      }
     }
   }
 
