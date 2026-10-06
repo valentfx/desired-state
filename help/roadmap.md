@@ -168,3 +168,7 @@ After those gates: persistent automatic queue for completed sessions with backof
 ## Windows upload status update
 2026-10-05: Windows session upload status from verification receipts; hash checks run off the UI isolate and detect added/missing/changed files. Pause/failure state persists; repeat-upload results separate already-stored files and newly confirmed bytes. Existing raw logs/credentials/backend are unchanged. Local diff checks passed; Flutter checks/build are installer gates. Source commit c2079aa. User confirmed prior home analysis/142 tests/Windows build and real upload; this follow-up still needs PC validation. Compression remains pending.
 
+
+## Lossless compression update
+Windows upload status and lossless gzip upload update: original hashes/lengths retained, compressed transfer/storage independently checked, old raw uploads reused, paused immutable snapshots retained while upload screen is open. Shared Dart encoder is cross-platform; current UI credentials remain Windows-only. Local phone storage readers and direct mobile upload remain next steps. Source commits c2079aa and ab4b324. This workspace passed Bash syntax, payload/ZIP integrity and Git diff checks; Flutter/PHP/MySQL runtime checks are installer gates, not claimed complete. Originals, existing server objects and credentials are retained.
+

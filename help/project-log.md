@@ -355,3 +355,7 @@ Flutter analysis passed, all 142 tests passed, and the Windows release build suc
 
 
 Windows upload status validation: formatting, analysis, full tests and clean Windows release build passed on this PC. No Android build, automatic commit or push performed.
+
+## Lossless compression update
+Windows upload status and lossless gzip upload update: original hashes/lengths retained, compressed transfer/storage independently checked, old raw uploads reused, paused immutable snapshots retained while upload screen is open. Shared Dart encoder is cross-platform; current UI credentials remain Windows-only. Local phone storage readers and direct mobile upload remain next steps. Source commits c2079aa and ab4b324. This workspace passed Bash syntax, payload/ZIP integrity and Git diff checks; Flutter/PHP/MySQL runtime checks are installer gates, not claimed complete. Originals, existing server objects and credentials are retained.
+

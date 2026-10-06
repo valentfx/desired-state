@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -24,10 +25,15 @@ class _BackendUploadScreenState extends State<BackendUploadScreen> {
   String? _receipt;
   UploadProgress? _progress;
   UploadControl? _control;
+  UploadSnapshot? _pausedSnapshot;
 
   @override
   void dispose() {
     _control?.cancelled = true;
+    if (!_busy && _pausedSnapshot != null) {
+      unawaited(_pausedSnapshot!.dispose().catchError((Object _) {}));
+      _pausedSnapshot = null;
+    }
     super.dispose();
   }
 
@@ -39,7 +45,9 @@ class _BackendUploadScreenState extends State<BackendUploadScreen> {
       _busy = true;
       _success = false;
       _progress = null;
-      _message = 'Preparing private snapshot and calculating file hashes…';
+      _message = _pausedSnapshot == null
+          ? 'Preparing lossless compressed snapshot and calculating file hashes…'
+          : 'Resuming the prepared snapshot from server offsets…';
     });
     UploadSnapshot? snapshot;
     HttpUploadApi? api;
@@ -47,7 +55,10 @@ class _BackendUploadScreenState extends State<BackendUploadScreen> {
       await writeUploadState(widget.directory, widget.sessionId, 'uploading');
       final token = await readWindowsUploadToken();
       control.check();
-      snapshot = await snapshotUpload(widget.directory.path);
+      snapshot =
+          _pausedSnapshot ??
+          await snapshotUpload(widget.directory.path, compress: true);
+      _pausedSnapshot = snapshot;
       control.check();
       if (snapshot.sessionId != widget.sessionId) {
         throw const FormatException('Selected session identity changed');
@@ -82,7 +93,7 @@ class _BackendUploadScreenState extends State<BackendUploadScreen> {
           _success = true;
           _receipt = file.path;
           _message =
-              'Verified ${snapshot!.files.length} files. Already stored: ${receipt['already_stored_files']} files. New data transferred: ${((receipt['transferred_bytes'] as int) / 1048576).toStringAsFixed(2)} MB. Local originals retained.';
+              'Verified ${snapshot!.files.length} files. Already stored: ${receipt['already_stored_files']} files. New data transferred: ${((receipt['transferred_bytes'] as int) / 1048576).toStringAsFixed(2)} MB. Server storage: ${((receipt['stored_bytes'] as int) / 1048576).toStringAsFixed(2)} MB. Local originals retained.';
         });
       }
     } catch (e) {
@@ -98,7 +109,8 @@ class _BackendUploadScreenState extends State<BackendUploadScreen> {
       if (mounted) setState(() => _message = '$e');
     } finally {
       api?.close();
-      if (snapshot != null) {
+      if (snapshot != null && (!control.cancelled || !mounted)) {
+        _pausedSnapshot = null;
         try {
           await snapshot.dispose();
         } catch (_) {
@@ -132,7 +144,7 @@ class _BackendUploadScreenState extends State<BackendUploadScreen> {
                 ),
                 const SizedBox(height: 12),
                 const Text(
-                  'Uploads all JSON/JSONL files in this completed session, including sensor logs, notes and state feedback. Temporary disk space equal to the session size is needed. Local files stay on this PC.',
+                  'Uploads all JSON/JSONL files in this completed session, including sensor logs, notes and state feedback. Temporary space for the original snapshot plus its compressed copy is needed. Local files stay on this PC.',
                 ),
                 const SizedBox(height: 20),
                 Text(_message, key: const Key('backend-upload-message')),
@@ -147,7 +159,7 @@ class _BackendUploadScreenState extends State<BackendUploadScreen> {
                 if (progress != null) ...[
                   const SizedBox(height: 8),
                   Text(
-                    '${(progress.completed / 1048576).toStringAsFixed(1)} / ${(progress.total / 1048576).toStringAsFixed(1)} MB · ${progress.verified}/${progress.fileCount} files verified',
+                    'Original data accounted for: ${(progress.completed / 1048576).toStringAsFixed(1)} / ${(progress.total / 1048576).toStringAsFixed(1)} MB · ${progress.verified}/${progress.fileCount} files verified',
                   ),
                 ],
                 if (_receipt != null) ...[

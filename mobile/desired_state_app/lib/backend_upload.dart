@@ -120,7 +120,17 @@ class HttpUploadApi implements UploadApi {
 }
 
 class UploadFile {
-  const UploadFile(this.name, this.path, this.bytes, this.hash);
+  const UploadFile(
+    this.name,
+    this.path,
+    this.bytes,
+    this.hash, {
+    this.compressedPath,
+    this.compressedBytes,
+    this.compressedHash,
+  });
+  final String? compressedPath, compressedHash;
+  final int? compressedBytes;
   final String name, path, hash;
   final int bytes;
 }
@@ -135,10 +145,15 @@ class UploadSnapshot {
   Future<void> dispose() => directory.delete(recursive: true);
 }
 
-Future<UploadSnapshot> snapshotUpload(String sourcePath) =>
-    Isolate.run(() => snapshotUploadWorker(sourcePath));
+Future<UploadSnapshot> snapshotUpload(
+  String sourcePath, {
+  bool compress = false,
+}) => Isolate.run(() => snapshotUploadWorker(sourcePath, compress: compress));
 
-Future<UploadSnapshot> snapshotUploadWorker(String sourcePath) async {
+Future<UploadSnapshot> snapshotUploadWorker(
+  String sourcePath, {
+  bool compress = false,
+}) async {
   final source = Directory(sourcePath);
   if (await FileSystemEntity.type(sourcePath, followLinks: false) !=
       FileSystemEntityType.directory) {
@@ -201,7 +216,32 @@ Future<UploadSnapshot> snapshotUploadWorker(String sourcePath) async {
       final copy = File('${stage.path}/$name');
       await original.copy(copy.path);
       final digest = await sha256.bind(copy.openRead()).first;
-      files.add(UploadFile(name, copy.path, await copy.length(), '$digest'));
+      final originalBytes = await copy.length();
+      String? packedPath, packedHash;
+      int? packedBytes;
+      if (compress && originalBytes > 0) {
+        final packed = File('${copy.path}.gz');
+        await copy.openRead().transform(gzip.encoder).pipe(packed.openWrite());
+        final size = await packed.length();
+        if (size < originalBytes) {
+          packedPath = packed.path;
+          packedBytes = size;
+          packedHash = '${await sha256.bind(packed.openRead()).first}';
+        } else {
+          await packed.delete();
+        }
+      }
+      files.add(
+        UploadFile(
+          name,
+          copy.path,
+          originalBytes,
+          '$digest',
+          compressedPath: packedPath,
+          compressedBytes: packedBytes,
+          compressedHash: packedHash,
+        ),
+      );
     }
     final currentNames = <String>{};
     await for (final entity in source.list(followLinks: false)) {
@@ -285,19 +325,44 @@ class BackendUploader {
     if (session['session_id'] != snapshot.sessionId) {
       throw const FormatException('Backend session identity mismatch');
     }
+    final canCompress =
+        (health['file_encodings'] is List) &&
+        (health['file_encodings'] as List).contains('gzip');
     var completed = 0, verified = 0, transferred = 0, alreadyStored = 0;
+    var storedBytes = 0;
     final receipts = <Map<String, dynamic>>[];
     for (final file in snapshot.files) {
       control.check();
+      final packed = canCompress && file.compressedPath != null;
+      var wirePath = packed ? file.compressedPath! : file.path;
+      var wireBytes = packed ? file.compressedBytes! : file.bytes;
+      var wireHash = packed ? file.compressedHash! : file.hash;
+      var encoding = packed ? 'gzip' : 'identity';
       final init = await api.call(
         'file',
         json: {
           'session_id': snapshot.sessionId,
           'file_name': file.name,
-          'bytes': file.bytes,
-          'sha256': file.hash,
+          'bytes': wireBytes,
+          'sha256': wireHash,
+          if (packed) ...{
+            'encoding': encoding,
+            'original_bytes': file.bytes,
+            'original_sha256': file.hash,
+          },
         },
       );
+      // Reuse an existing uncompressed revision, including a paused upload.
+      if (packed && init['encoding'] == 'identity') {
+        if (init['original_sha256'] != file.hash ||
+            init['expected_bytes'] != file.bytes) {
+          throw const FormatException('Existing backend revision mismatch');
+        }
+        wirePath = file.path;
+        wireBytes = file.bytes;
+        wireHash = file.hash;
+        encoding = 'identity';
+      }
       final id = init['upload_id'];
       final serverLimit = init['chunk_bytes'];
       if (id is! String ||
@@ -307,19 +372,22 @@ class BackendUploader {
           maxChunkBytes < 1) {
         throw const FormatException('Invalid backend upload metadata');
       }
-      var offset = _offset(init, file.bytes), attempts = 0;
+      var offset = _offset(init, wireBytes), attempts = 0;
       final previouslyVerified = init['status'] == 'verified';
       if (previouslyVerified) {
         alreadyStored++;
       }
-      final reader = await File(file.path).open();
+      final reader = await File(wirePath).open();
       try {
-        while (offset < file.bytes) {
+        while (offset < wireBytes) {
           control.check();
           onProgress(
             UploadProgress(
               file.name,
-              completed + offset,
+              completed +
+                  (wireBytes == 0
+                      ? 0
+                      : (file.bytes * (offset / wireBytes)).floor()),
               snapshot.totalBytes,
               verified,
               snapshot.files.length,
@@ -327,7 +395,7 @@ class BackendUploader {
           );
           await reader.setPosition(offset);
           final bytes = await reader.read(
-            math.min(math.min(serverLimit, maxChunkBytes), file.bytes - offset),
+            math.min(math.min(serverLimit, maxChunkBytes), wireBytes - offset),
           );
           if (bytes.isEmpty) {
             throw const FileSystemException('Upload snapshot is incomplete');
@@ -339,7 +407,7 @@ class BackendUploader {
               bytes: bytes,
               offset: offset,
             );
-            final next = _offset(response, file.bytes);
+            final next = _offset(response, wireBytes);
             if (next != offset + bytes.length) {
               throw const FormatException('Unexpected backend acknowledgment');
             }
@@ -353,7 +421,7 @@ class BackendUploader {
             if (e is FormatException || ++attempts > 3) rethrow;
             control.check();
             final status = await api.call('status', uploadId: id);
-            final next = _offset(status, file.bytes);
+            final next = _offset(status, wireBytes);
             if (next > offset) {
               transferred += next - offset;
               attempts = 0;
@@ -368,11 +436,19 @@ class BackendUploader {
       final finish = await api.call('finish', uploadId: id);
       final status = await api.call('status', uploadId: id);
       if (finish['status'] != 'verified' ||
-          finish['sha256'] != file.hash ||
+          finish['sha256'] != wireHash ||
           status['status'] != 'verified' ||
-          _offset(status, file.bytes) != file.bytes) {
+          _offset(status, wireBytes) != wireBytes) {
         throw const FormatException('Backend file verification mismatch');
       }
+      if (encoding == 'gzip' &&
+          (finish['original_sha256'] != file.hash ||
+              finish['original_bytes'] != file.bytes)) {
+        throw const FormatException(
+          'Backend decompressed verification mismatch',
+        );
+      }
+      storedBytes += wireBytes;
       verified++;
       completed += file.bytes;
       receipts.add({
@@ -381,6 +457,9 @@ class BackendUploader {
         'sha256': file.hash,
         'upload_id': id,
         'status': 'verified',
+        'storage_encoding': encoding,
+        'stored_bytes': wireBytes,
+        'stored_sha256': wireHash,
       });
       onProgress(
         UploadProgress(
@@ -401,6 +480,7 @@ class BackendUploader {
       'files': receipts,
       'total_bytes': completed,
       'transferred_bytes': transferred,
+      'stored_bytes': storedBytes,
       'already_stored_files': alreadyStored,
       'verification_scope': 'each_original_file; not_atomic_session_revision',
     };

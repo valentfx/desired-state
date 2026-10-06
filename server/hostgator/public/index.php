@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 ini_set('display_errors', '0');
+require __DIR__.'/compression.php';
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 header('X-Content-Type-Options: nosniff');
@@ -46,7 +47,7 @@ try {
     $action=$_GET['action'] ?? 'health'; $method=$_SERVER['REQUEST_METHOD'] ?? 'GET';
     if ($action==='health' && $method==='GET') {
         $version=statement('SELECT MAX(version) FROM ds_schema_migrations')->fetchColumn();
-        reply(200,['service'=>'desired-state','api_version'=>1,'schema_version'=>(int)$version,'database'=>'ready']);
+        reply(200,['service'=>'desired-state','api_version'=>1,'schema_version'=>1,'storage_schema_version'=>(int)$version,'database'=>'ready','file_encodings'=>['identity','gzip']]);
     }
     $authorization=$_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '';
     if (!preg_match('/\ABearer ([a-f0-9]{64})\z/D',trim($authorization),$match)) { fail(401,'Upload token required'); }
@@ -69,6 +70,20 @@ try {
     if ($action==='file' && $method==='POST') {
         $data=body(); $session=$data['session_id'] ?? ''; $name=$data['file_name'] ?? ''; $hash=$data['sha256'] ?? ''; $bytes=$data['bytes'] ?? null;
         if (!is_string($session) || !preg_match('/\A[A-Za-z0-9_-]{1,128}\z/D',$session) || !is_string($name) || !preg_match('/\A[A-Za-z0-9_-][A-Za-z0-9_.-]{0,116}\.jsonl?\z/D',$name) || !is_string($hash) || !preg_match('/\A[a-f0-9]{64}\z/D',$hash) || !is_int($bytes) || $bytes<0 || $bytes>$config['max_file_bytes']) { fail(400,'Invalid file metadata'); }
+        $encoding=$data['encoding'] ?? 'identity';
+        $originalBytes=$data['original_bytes'] ?? $bytes;
+        $originalHash=$data['original_sha256'] ?? $hash;
+        if (!in_array($encoding,['identity','gzip'],true) || !is_int($originalBytes) || $originalBytes<0 || $originalBytes>$config['max_file_bytes'] || !is_string($originalHash) || !preg_match('/\A[a-f0-9]{64}\z/D',$originalHash) || ($encoding==='identity' && ($originalBytes!==$bytes || $originalHash!==$hash))) { fail(400,'Invalid original file metadata'); }
+        // Preserve and resume old uncompressed uploads instead of duplicating them.
+        if ($encoding==='gzip') {
+            $prior=statement("SELECT * FROM ds_uploads WHERE account_id=? AND session_id=? AND file_name=? AND sha256=? AND encoding='identity'",[$account,$session,$name,$originalHash])->fetch(PDO::FETCH_ASSOC);
+            if ($prior) {
+                if ((int)$prior['expected_bytes']!==$originalBytes) { fail(409,'Existing original size mismatch'); }
+                $lock=lockUpload($prior['upload_id']);
+                $prior=statement('SELECT * FROM ds_uploads WHERE upload_id=?',[$prior['upload_id']])->fetch(PDO::FETCH_ASSOC);
+                reply(200,['upload_id'=>$prior['upload_id'],'offset'=>offset($prior),'status'=>$prior['status'],'chunk_bytes'=>$config['max_chunk_bytes'],'encoding'=>'identity','expected_bytes'=>(int)$prior['expected_bytes'],'original_sha256'=>$originalHash]);
+            }
+        }
         if (!statement('SELECT session_id FROM ds_sessions WHERE account_id=? AND session_id=?',[$account,$session])->fetchColumn()) { fail(404,'Register session first'); }
         $db->beginTransaction();
         statement('SELECT account_id FROM ds_accounts WHERE account_id=? FOR UPDATE',[$account]);
@@ -78,13 +93,13 @@ try {
             if ($reserved+$bytes>($config['max_account_bytes'] ?? 10737418240)) { $db->rollBack(); fail(413,'Account upload allowance exceeded'); }
         }
         $id=bin2hex(random_bytes(16));
-        statement('INSERT IGNORE INTO ds_uploads(upload_id,account_id,session_id,file_name,expected_bytes,sha256) VALUES(?,?,?,?,?,?)',[$id,$account,$session,$name,$bytes,$hash]);
+        statement('INSERT IGNORE INTO ds_uploads(upload_id,account_id,session_id,file_name,expected_bytes,sha256,encoding,original_bytes,original_sha256) VALUES(?,?,?,?,?,?,?,?,?)',[$id,$account,$session,$name,$bytes,$hash,$encoding,$originalBytes,$originalHash]);
         $row=statement('SELECT * FROM ds_uploads WHERE account_id=? AND session_id=? AND file_name=? AND sha256=?',[$account,$session,$name,$hash])->fetch(PDO::FETCH_ASSOC);
         $db->commit();
-        if ((int)$row['expected_bytes']!==$bytes) { fail(409,'Conflicting file size'); }
+        if ((int)$row['expected_bytes']!==$bytes || $row['encoding']!==$encoding || (int)($row['original_bytes'] ?? $row['expected_bytes'])!==$originalBytes || ($row['original_sha256'] ?? $row['sha256'])!==$originalHash) { fail(409,'Conflicting file metadata'); }
         $lock=lockUpload($row['upload_id']);
         $row=statement('SELECT * FROM ds_uploads WHERE upload_id=?',[$row['upload_id']])->fetch(PDO::FETCH_ASSOC);
-        reply(200,['upload_id'=>$row['upload_id'],'offset'=>offset($row),'status'=>$row['status'],'chunk_bytes'=>$config['max_chunk_bytes']]);
+        reply(200,['upload_id'=>$row['upload_id'],'offset'=>offset($row),'status'=>$row['status'],'chunk_bytes'=>$config['max_chunk_bytes'],'encoding'=>$row['encoding'],'expected_bytes'=>(int)$row['expected_bytes']]);
     }
     if ($action==='status' && $method==='GET') {
         $row=lockedUpload(); reply(200,['upload_id'=>$row['upload_id'],'offset'=>offset($row),'status'=>$row['status']]);
@@ -110,9 +125,9 @@ try {
     }
     if ($action==='finish' && $method==='POST') {
         $row=lockedUpload();
-        if ($row['status']==='verified') { reply(200,['status'=>'verified','sha256'=>$row['sha256']]); }
+        if ($row['status']==='verified') { reply(200,['status'=>'verified','sha256'=>$row['sha256'],'encoding'=>$row['encoding'],'original_sha256'=>$row['original_sha256'] ?? $row['sha256'],'original_bytes'=>(int)($row['original_bytes'] ?? $row['expected_bytes'])]); }
         $part=$config['private_root'].'/uploads/'.$row['upload_id'].'.part';
-        $key=$account.'/'.substr($row['sha256'],0,2).'/'.$row['sha256'];
+        $key=$account.'/'.substr($row['sha256'],0,2).'/'.$row['sha256'].($row['encoding']==='gzip' ? '.gz' : '');
         $destination=$config['private_root'].'/storage/'.$key;
         if (!is_file($part) && is_file($destination) && filesize($destination)===(int)$row['expected_bytes'] && hash_equals($row['sha256'],hash_file('sha256',$destination))) {
             // Re-create the staging reference so normal manifest checks still run.
@@ -122,9 +137,13 @@ try {
         if (offset($row)!==(int)$row['expected_bytes']) { fail(409,'File incomplete'); }
         @set_time_limit(120);
         if (!hash_equals($row['sha256'],hash_file('sha256',$part))) { fail(422,'File integrity failed; reset and retry'); }
+        $originalBytes=(int)($row['original_bytes'] ?? $row['expected_bytes']);
+        $originalHash=$row['original_sha256'] ?? $row['sha256'];
+        try { $decoded=decodedFile($part,$row['encoding'],$originalBytes,$row['file_name']==='manifest.json'); }
+        catch (Throwable $e) { fail(422,'Decoded file integrity failed; reset and retry'); }
+        if (!hash_equals($originalHash,$decoded['sha256'])) { fail(422,'Original file hash mismatch'); }
         if ($row['file_name']==='manifest.json') {
-            if ((int)$row['expected_bytes']>2097152) { fail(413,'Manifest too large'); }
-            $m=json_decode(file_get_contents($part),true);
+            $m=json_decode($decoded['text'],true);
             if (!is_array($m) || ($m['session_id'] ?? null)!==$row['session_id'] || ($m['schema_version'] ?? null)!==1) { fail(422,'Manifest identity mismatch'); }
         }
         if (!is_dir(dirname($destination))) { mkdir(dirname($destination),0700,true); }
@@ -134,7 +153,7 @@ try {
         } elseif (!rename($part,$destination)) { fail(500,'Could not publish file'); }
         chmod($destination,0600);
         statement("UPDATE ds_uploads SET status='verified',storage_key=?,verified_utc=UTC_TIMESTAMP() WHERE upload_id=?",[$key,$row['upload_id']]);
-        reply(200,['status'=>'verified','sha256'=>$row['sha256'],'bytes'=>(int)$row['expected_bytes']]);
+        reply(200,['status'=>'verified','sha256'=>$row['sha256'],'bytes'=>(int)$row['expected_bytes'],'encoding'=>$row['encoding'],'original_sha256'=>$originalHash,'original_bytes'=>$originalBytes]);
     }
     if ($action==='reset' && $method==='POST') {
         $row=lockedUpload();

@@ -12,6 +12,7 @@ class FakeUploadApi implements UploadApi {
   final verified = <String>{};
   bool dropAckOnce = false, badHash = false, badOffset = false;
   int chunkCalls = 0, registrations = 0;
+  bool supportsGzip = false, badOriginalHash = false;
 
   @override
   Future<Map<String, dynamic>> call(
@@ -22,7 +23,12 @@ class FakeUploadApi implements UploadApi {
     int? offset,
   }) async {
     if (action == 'health') {
-      return {'api_version': 1, 'schema_version': 1, 'database': 'ready'};
+      return {
+        'api_version': 1,
+        'schema_version': 1,
+        'database': 'ready',
+        if (supportsGzip) 'file_encodings': ['identity', 'gzip'],
+      };
     }
     if (action == 'session') {
       return {
@@ -72,6 +78,12 @@ class FakeUploadApi implements UploadApi {
       return {
         'status': 'verified',
         'sha256': badHash ? 'wrong' : files[id]!['sha256'],
+        if (files[id]!['encoding'] == 'gzip') ...{
+          'original_sha256': badOriginalHash
+              ? 'wrong'
+              : sha256.convert(gzip.decode(data[id]!)).toString(),
+          'original_bytes': gzip.decode(data[id]!).length,
+        },
       };
     }
     throw StateError('Unexpected test action');
@@ -102,6 +114,48 @@ void main() {
   });
   tearDown(() async {
     await root.delete(recursive: true);
+  });
+
+  test('gzip snapshot is lossless, deterministic and resumable without duplicate transfer', () async {
+    final raw = utf8.encode(
+      '${List.filled(2000, '{"eeg":[1.23456789,2.3456789]}').join('\n')}\n',
+    );
+    await File('${session.path}/muse_eeg.jsonl').writeAsBytes(raw);
+    final snapshot = await snapshotUpload(session.path, compress: true);
+    final again = await snapshotUpload(session.path, compress: true);
+    try {
+      final file = snapshot.files.singleWhere(
+        (f) => f.name == 'muse_eeg.jsonl',
+      );
+      final second = again.files.singleWhere((f) => f.name == file.name);
+      expect(file.compressedBytes!, lessThan(file.bytes));
+      expect(file.compressedHash, second.compressedHash);
+      expect(gzip.decode(await File(file.compressedPath!).readAsBytes()), raw);
+      final api = FakeUploadApi()
+        ..supportsGzip = true
+        ..dropAckOnce = true;
+      final receipt = await BackendUploader(api)
+          .upload(snapshot, control: UploadControl(), onProgress: (_) {});
+      expect(receipt['stored_bytes'] as int, lessThan(snapshot.totalBytes));
+      final calls = api.chunkCalls;
+      final retry = await BackendUploader(api)
+          .upload(snapshot, control: UploadControl(), onProgress: (_) {});
+      expect(retry['transferred_bytes'], 0);
+      expect(api.chunkCalls, calls);
+      api.badOriginalHash = true;
+      await expectLater(
+        BackendUploader(api)
+            .upload(snapshot, control: UploadControl(), onProgress: (_) {}),
+        throwsFormatException,
+      );
+      final legacy = FakeUploadApi();
+      final fallback = await BackendUploader(legacy)
+          .upload(snapshot, control: UploadControl(), onProgress: (_) {});
+      expect(fallback['stored_bytes'], snapshot.totalBytes);
+    } finally {
+      await snapshot.dispose();
+      await again.dispose();
+    }
   });
 
   test('snapshot and lost-ack resume preserve every original byte, including zero-length files', () async {

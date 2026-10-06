@@ -13,6 +13,7 @@ mkdir -p "$private_root"/{config,storage,uploads,backups}
 chmod 700 "$private_root" "$private_root"/{config,storage,uploads,backups}
 php -l "$package_root/tools/configure.php"
 php -l "$package_root/public/index.php"
+php -l "$package_root/public/compression.php"
 if [[ ! -f "$private_root/config/backend.php" ]]; then
     read -r -s -p 'Database user password (hidden): ' ds_database_password
     printf '\n'
@@ -23,8 +24,9 @@ php -r '$c=require "/home2/valentfx/desired-state-private/config/backend.php"; $
 publish_root="$(mktemp -d /home2/valentfx/public_html/.desired-state-api-XXXXXXXX)"
 trap 'rm -rf -- "$publish_root"' EXIT
 cp "$package_root/public/index.php" "$publish_root/index.php"
+cp "$package_root/public/compression.php" "$publish_root/compression.php"
 cp "$package_root/public/.htaccess" "$publish_root/.htaccess"
-chmod 644 "$publish_root/index.php" "$publish_root/.htaccess"
+chmod 644 "$publish_root/index.php" "$publish_root/compression.php" "$publish_root/.htaccess"
 chmod 755 "$publish_root"
 mv -T "$publish_root" "$api_root"
 trap - EXIT

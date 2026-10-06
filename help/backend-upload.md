@@ -46,3 +46,7 @@ The original installer package and synthetic integration test remain in the date
 - Missing session: phone sync/import comes first; Windows uploads from its existing local master folder.
 
 User reported that PHP lint, schema, HTTPS and synthetic authentication/chunk/hash checks passed. Local standalone Dart uploader checks passed; full Flutter/Windows/DPAPI tests and a real log transfer still require this PC. Automatic uploads, event indexing, participant access grants, new-user onboarding and backup/restore are not implemented by this package.
+
+## Lossless compression update
+Windows upload status and lossless gzip upload update: original hashes/lengths retained, compressed transfer/storage independently checked, old raw uploads reused, paused immutable snapshots retained while upload screen is open. Shared Dart encoder is cross-platform; current UI credentials remain Windows-only. Local phone storage readers and direct mobile upload remain next steps. Source commits c2079aa and ab4b324. This workspace passed Bash syntax, payload/ZIP integrity and Git diff checks; Flutter/PHP/MySQL runtime checks are installer gates, not claimed complete. Originals, existing server objects and credentials are retained.
+
