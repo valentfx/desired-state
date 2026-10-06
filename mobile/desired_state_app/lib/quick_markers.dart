@@ -11,18 +11,89 @@ String newMarkerId() => List.generate(
 ).join();
 
 class QuickMarkerDefinition {
-  const QuickMarkerDefinition(this.id, this.label);
+  const QuickMarkerDefinition(
+    this.id,
+    this.label, {
+    this.activityId,
+    this.uses = 0,
+  });
   final String id;
   final String label;
-  Map<String, String> toJson() => {'id': id, 'label': label};
+  final String? activityId;
+  final int uses;
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'label': label,
+    'activity_id': ?activityId,
+    'uses': uses,
+  };
 }
+
+const activityMarkerCatalog = [
+  QuickMarkerDefinition('activity-yoga', 'Yoga', activityId: 'yoga'),
+  QuickMarkerDefinition(
+    'activity-resistance-training',
+    'Resistance training',
+    activityId: 'resistance_training',
+  ),
+  QuickMarkerDefinition(
+    'activity-breathwork',
+    'Breathwork',
+    activityId: 'breathwork',
+  ),
+  QuickMarkerDefinition(
+    'activity-sound-bowls',
+    'Sound bowls',
+    activityId: 'sound_bowls',
+  ),
+  QuickMarkerDefinition(
+    'activity-meditation',
+    'Meditation',
+    activityId: 'meditation',
+  ),
+  QuickMarkerDefinition(
+    'activity-stretching',
+    'Stretching',
+    activityId: 'stretching',
+  ),
+  QuickMarkerDefinition('activity-running', 'Running', activityId: 'running'),
+  QuickMarkerDefinition(
+    'activity-steam-room',
+    'Steam room',
+    activityId: 'steam_room',
+  ),
+  QuickMarkerDefinition('activity-sauna', 'Sauna', activityId: 'sauna'),
+  QuickMarkerDefinition(
+    'activity-swimming',
+    'Swimming',
+    activityId: 'swimming',
+  ),
+  QuickMarkerDefinition(
+    'activity-pickleball',
+    'Pickleball',
+    activityId: 'pickleball',
+  ),
+  QuickMarkerDefinition('activity-walking', 'Walking', activityId: 'walking'),
+  QuickMarkerDefinition('activity-cycling', 'Cycling', activityId: 'cycling'),
+  QuickMarkerDefinition('activity-haptics', 'Haptics', activityId: 'haptics'),
+  QuickMarkerDefinition('activity-audio', 'Audio', activityId: 'audio'),
+  QuickMarkerDefinition('activity-rest', 'Rest', activityId: 'rest'),
+];
 
 /// App-wide definitions, separate from immutable event label snapshots.
 class QuickMarkerStore extends ChangeNotifier {
   QuickMarkerStore({this.directoryProvider});
   final Future<Directory> Function()? directoryProvider;
   List<QuickMarkerDefinition> _items = [];
-  List<QuickMarkerDefinition> get items => List.unmodifiable(_items);
+  List<QuickMarkerDefinition> get items {
+    final indexed = _items.indexed.toList();
+    indexed.sort((a, b) {
+      final usage = b.$2.uses.compareTo(a.$2.uses);
+      return usage != 0 ? usage : a.$1.compareTo(b.$1);
+    });
+    return List.unmodifiable(indexed.map((entry) => entry.$2));
+  }
+
   bool ready = false;
   bool saving = false;
   String? error;
@@ -72,7 +143,19 @@ class QuickMarkerStore extends ChangeNotifier {
           )) {
             throw const FormatException('Duplicate marker definition');
           }
-          items.add(QuickMarkerDefinition(row['id'] as String, label));
+          if ((row['activity_id'] != null && row['activity_id'] is! String) ||
+              (row['uses'] != null &&
+                  (row['uses'] is! int || (row['uses'] as int) < 0))) {
+            throw const FormatException('Invalid marker usage or activity');
+          }
+          items.add(
+            QuickMarkerDefinition(
+              row['id'] as String,
+              label,
+              activityId: row['activity_id'] as String?,
+              uses: row['uses'] as int? ?? 0,
+            ),
+          );
         }
         _items = items;
       } else {
@@ -123,7 +206,7 @@ class QuickMarkerStore extends ChangeNotifier {
       saving = true;
       _changed();
       try {
-        final next = edit(List.of(_items));
+        final next = edit(List.of(items));
         await _persist(next);
         _items = next;
       } finally {
@@ -138,6 +221,41 @@ class QuickMarkerStore extends ChangeNotifier {
   Future<void> add(String label) => _mutate((items) {
     final name = _uniqueLabel(items, label);
     return [...items, QuickMarkerDefinition(newMarkerId(), name)];
+  });
+
+  Future<void> addActivity(QuickMarkerDefinition definition) => _mutate((
+    items,
+  ) {
+    if (items.any(
+      (item) =>
+          item.id == definition.id || item.activityId == definition.activityId,
+    )) {
+      throw const FormatException('Activity already added');
+    }
+    final label = _uniqueLabel(items, definition.label);
+    return [
+      ...items,
+      QuickMarkerDefinition(
+        definition.id,
+        label,
+        activityId: definition.activityId,
+      ),
+    ];
+  });
+
+  Future<void> recordUse(String id) => _mutate((items) {
+    final index = items.indexWhere((item) => item.id == id);
+    if (index < 0) {
+      return items;
+    } // Removing a button does not invalidate past events.
+    final item = items[index];
+    items[index] = QuickMarkerDefinition(
+      item.id,
+      item.label,
+      activityId: item.activityId,
+      uses: item.uses + 1,
+    );
+    return items;
   });
 
   String _uniqueLabel(
@@ -160,7 +278,12 @@ class QuickMarkerStore extends ChangeNotifier {
     final name = _uniqueLabel(items, label, exceptId: id);
     final index = items.indexWhere((item) => item.id == id);
     if (index < 0) throw StateError('Marker no longer exists');
-    items[index] = QuickMarkerDefinition(id, name);
+    items[index] = QuickMarkerDefinition(
+      id,
+      name,
+      activityId: items[index].activityId,
+      uses: items[index].uses,
+    );
     return items;
   });
 

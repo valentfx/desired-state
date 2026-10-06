@@ -17,6 +17,8 @@ import 'preferences_screen.dart';
 import 'session_timeline_screen.dart';
 import 'session_review_screen.dart';
 import 'settings_screen.dart';
+import 'state_feedback.dart';
+import 'state_feedback_widgets.dart';
 
 void main() {
   runApp(const DesiredStateApp());
@@ -379,11 +381,104 @@ class _CollectorScreenState extends State<CollectorScreen> {
     _eventDescriptionController.clear();
   }
 
+  SessionContext _nextContext = const SessionContext();
+  int? _preRating;
+  DateTime? _preRatingAt;
+
+  Future<void> _setupSession() async {
+    final result = await showSessionSetup(context, _nextContext);
+    if (result != null && mounted) {
+      setState(() {
+        _nextContext = result.context;
+        _preRating = result.value;
+        _preRatingAt = result.ratedAt;
+      });
+    }
+  }
+
+  Future<void> _rateSession(String phase) async {
+    // Capture the session before opening UI; never redirect a delayed answer.
+    final logger = phase == 'post'
+        ? _controller.lastSessionLogger
+        : _controller.sessionLogger;
+    if (logger == null || _controller.busy) {
+      return;
+    }
+    final config = _controller.sessionContext;
+    final participantId = logger.participantId;
+    if (config.question == FeedbackQuestion.goal &&
+        config.desiredState.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Choose a rating question and desired state in Session setup before recording.',
+          ),
+        ),
+      );
+      return;
+    }
+    final value = await showStateRating(context, config.question);
+    if (value == null) {
+      return;
+    }
+    try {
+      await StateFeedbackStore(logger.directory, logger.sessionId).add(
+        question: config.question,
+        value: value,
+        phase: phase,
+        source: 'live_app',
+        desiredState: config.desiredState,
+        participantId: participantId,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Saved $phase rating: $value/10')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Rating not saved: $e')));
+      }
+    }
+  }
+
   Future<void> _startSession() async {
     await _controller.start(
       participantName: _participantNameController.text,
       participantProfileId: _controller.participantId,
+      context: _nextContext,
     );
+    final startedLogger = _controller.sessionLogger;
+    final value = _preRating;
+    if (startedLogger != null) {
+      _preRating = null;
+      if (value != null) {
+        try {
+          await StateFeedbackStore(
+            startedLogger.directory,
+            startedLogger.sessionId,
+          ).add(
+            question: _nextContext.question,
+            value: value,
+            phase: 'pre',
+            source: 'session_setup',
+            desiredState: _nextContext.desiredState,
+            participantId: startedLogger.participantId,
+            eventAt: _preRatingAt,
+          );
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Recording started; pre-rating not saved: $e'),
+              ),
+            );
+          }
+        }
+      }
+      _preRatingAt = null;
+    }
     if (_controller.sessionLogger != null &&
         _controller.participantInfo.isNotEmpty) {
       await _controller.editRecordingParticipant(
@@ -646,6 +741,11 @@ class _CollectorScreenState extends State<CollectorScreen> {
         label: const Text('Choose / edit participant'),
       ),
       const SizedBox(height: 12),
+      OutlinedButton.icon(
+        onPressed: _controller.busy ? null : _setupSession,
+        icon: const Icon(Icons.assignment_outlined),
+        label: const Text('Session setup / starting rating'),
+      ),
       if (_connected) ...[
         _deviceLine(),
         const SizedBox(height: 20),
@@ -732,6 +832,14 @@ class _CollectorScreenState extends State<CollectorScreen> {
           ),
         ),
         QuickMarkerBar(controller: _controller, compact: true),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: _controller.busy ? null : () => _rateSession('during'),
+            icon: const Icon(Icons.sentiment_satisfied_alt),
+            label: const Text('How do I feel?'),
+          ),
+        ),
         Row(
           children: [
             Expanded(
@@ -773,6 +881,15 @@ class _CollectorScreenState extends State<CollectorScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text('Session saved', style: Theme.of(context).textTheme.headlineSmall),
+        OutlinedButton.icon(
+          onPressed: _controller.busy ? null : () => _rateSession('post'),
+          icon: const Icon(Icons.sentiment_satisfied_alt),
+          label: const Text('Optional ending rating'),
+        ),
+        TextButton(
+          onPressed: _setupSession,
+          child: const Text('Setup next session'),
+        ),
         FilledButton.icon(
           onPressed: _controller.busy ? null : _reviewLastSession,
           icon: const Icon(Icons.analytics_outlined),

@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 
 import 'session_archive.dart';
+import 'state_feedback.dart';
 import 'device_models.dart';
 import 'h10_accelerometer.dart';
 import 'h10_ecg.dart';
@@ -15,12 +16,14 @@ class SessionLogger {
     this.sessionId,
     this.polarId,
     this.participantName,
+    this.participantId,
   );
 
   final Directory directory;
   final String sessionId;
   final String polarId;
   final String participantName;
+  final String? participantId;
   Future<void> _writes = Future.value();
   Future<void> _annotationWrites = Future.value();
   final Map<String, IOSink> _sinks = {};
@@ -39,6 +42,7 @@ class SessionLogger {
     DateTime? startedAt,
     Map<String, dynamic>? additionalDevices,
     String primaryDeviceKind = 'polar_h10',
+    SessionContext context = const SessionContext(),
   }) async {
     final documents =
         await (directoryProvider ?? getApplicationDocumentsDirectory)();
@@ -54,11 +58,15 @@ class SessionLogger {
       id,
       polarId.toUpperCase(),
       participantName,
+      participantId,
     );
     await logger._writeJson('manifest.json', {
       'schema_version': 1,
       'session_id': id,
       'source': 'desired_state_flutter',
+      'session_context': context.toJson(),
+      'state_feedback_version': 1,
+      'local_timezone_offset_minutes': DateTime.now().timeZoneOffset.inMinutes,
       'participant_id': ?participantId,
       'description': description.trim(),
       'rr_processing': 'mobile-median9-25pct-300-2000-v1',
@@ -294,6 +302,7 @@ class SessionLogger {
     String? markerDefinitionId,
     String? markerLabel,
     String? markerType,
+    String? activityId,
     bool flush = false,
   }) {
     final timestamp = (receivedAt ?? DateTime.now()).toUtc().toIso8601String();
@@ -308,6 +317,9 @@ class SessionLogger {
         'marker_definition_id': ?markerDefinitionId,
         'marker_label': ?markerLabel,
         'marker_type': ?markerType,
+        'activity_id': ?activityId,
+        if (activityId != null) 'activity_action': 'mark',
+        if (activityId != null) 'activity_schema_version': 1,
         if (description != null && description.trim().isNotEmpty)
           'description': description.trim(),
       });

@@ -39,3 +39,7 @@ After meaningful implementation, architecture decisions, or hardware validation,
 - This file when working conventions or architecture change.
 
 Do not call a planned feature implemented merely because a scaffold, dependency, related Python feature, or UI label exists. Record unresolved decisions explicitly. Never commit credentials, participant recordings, backups, generated plugin files, or build outputs. The earlier September 30 handoff was documentation-only; stage 1 implementation is recorded separately in the help log.
+
+## Current feedback and commit conventions
+
+Use help/state-feedback-and-upload-contract.md for current rating and backend contracts. User/Research experiences share acquisition and storage; detailed setup lives outside Live. Feedback is optional and Stop is immediate. Never reuse a prior feeling score as a new response. Every meaningful change updates help/current-state.md, help/roadmap.md and help/project-log.md, reviews its diff, runs appropriate checks and uses a descriptive commit explaining behavior, purpose and actual validation. Never describe unrun checks or planned backend functionality as complete.

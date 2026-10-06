@@ -322,3 +322,30 @@ The isolated menu-navigation test identified a production assertion: Overview re
 ## Work PC integration 2026-10-05
 Merged origin/main into the work PC branch. Retained local calibration validation notes and resolved documentation conflicts. Windows release build and launch succeeded before this merge. Desktop inventory found 23 sessions and 187 JSONL files dated October 2 through October 5 by session IDs; all scanned backup sessions are present. No post-merge tests rerun because the merge changes documentation and adds a historical Gradle backup file.
 Planned work: User and Research experiences in one app; defined 0-10 pre, during and post ratings; reusable session presets; clearer phone sync progress; HRV Logger import. Future changes must update working docs and use descriptive commits with validation details.
+
+## State feedback foundation 2026-10-05
+
+Added optional session context and defined 0–10 pre/live/post feedback. Live opens a compact rating sheet; Start and Stop remain independent of feedback. Append-only state_feedback.jsonl preserves question definitions, goal, phase, event/entry times and stable session identity; exports and existing JSONL phone sync retain the journal. Phone History supports current-time follow-ups for stopped sessions; Windows provides a read-only viewer. Legacy sessions have no invented answers. Persistent presets, full experience switching, timeline overlays and backend uploads remain pending. See [state-feedback-and-upload-contract.md](state-feedback-and-upload-contract.md).
+
+Validation: matching Dart 3.13.4 formatting/parsing and standalone journal checks passed (11 ordered writes including zero, unique event IDs, corruption preservation). Full Flutter analysis/tests/build could not run: pub.dev access was blocked and required dependencies are absent from cache. New regression tests are included; the PC installer gates builds on analysis and the full test suite. Physical phone and Windows validation remain required.
+
+## Activity marker update
+
+Start remains immediate without setup. Add activity buttons through Quick markers: yoga, resistance training, breathwork, sound bowls, meditation, stretching, running, steam room, sauna, swimming, pickleball, walking, cycling, haptics, audio and rest. Existing user lists are not replaced. Custom labels, add/remove/rename and persistence remain supported. Most-used favorites sort first; equal usage counts retain the saved ordering. The compact Live row scrolls horizontally to reach all favorites. Usage increments only after a successful marker write. Old definitions read with zero usage and no activity ID. Past event labels/IDs remain immutable.
+
+Catalog activity markers add activity_id, activity_schema_version 1 and activity_action mark to existing marked_event rows. These are instant observations, not inferred start/stop intervals. Custom markers retain stable marker_definition_id and label snapshots without inventing an activity category. Backend event ingestion must preserve these fields. Explicit duration/start/stop controls remain pending.
+
+## Marker manager layout repair 2026-10-05
+
+User PC: Flutter analysis passed, 133 tests passed and the existing marker-manager widget test failed because the expanded activity catalog displaced saved markers. Moved the catalog below favorites into an initially collapsed expansion. Existing regression test is retained; full rerun/build remain pending. Repair package verifies source hashes and resumes the applied update without another cherry-pick.
+
+## 2026-10-05 — versioned HostGator backend and manual Windows uploads
+
+Added deployed backend source under server/hostgator, including additive MySQL schema, PHP API, SSH installer, private configuration generator and synthetic upload test. Deployment was performed by the user: checksum/PHP syntax checks, schema setup, HTTPS health and smoke test all passed. Test session backend_smoke_2668331a28606104 is synthetic and must be excluded from modeling. Generated secrets and raw data are excluded from version control.
+
+Windows Analyze gains a separate upload screen for one completed session. Snapshotting/hashing runs outside the UI isolate and bounds transfer memory. Server offsets govern retries; every file must finish with matching hash and verified byte count before a local receipt is written. DPAPI credentials are scoped to the current Windows login and obtained by a one-time SSH helper. Originals are retained. Stop/profile defaults are deliberately not part of this backend change.
+
+Validation: standalone Dart 3.13.4 analysis and eight uploader tests passed (snapshot preservation, lost-ack resume, duplicate suppression, zero-byte/Unicode data, source edits, incomplete/corrupt sessions, link rejection, incorrect offsets/hashes, pause/retry and credential-redacted errors). Harness uses cached crypto 3.0.7 while the app retains crypto 3.0.6. Dart formatting/parsing and Bash installer syntax pass. PHP/MySQL execution was verified by the user on HostGator, not repeated in this workspace. PowerShell/DPAPI, full Flutter suite and Windows release build must pass on the PC; real-session upload and large-file verification remain unrun. No remote push or automatic upload was performed here.
+
+## Home Windows upload validation 2026-10-05
+Flutter analysis passed, all 142 tests passed, and the Windows release build succeeded. Android APK build remains blocked because the configured desired-state-home-debug.keystore is missing on this PC. No Android installation performed. Windows credential setup and a real-session upload remain pending.

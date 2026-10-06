@@ -256,3 +256,32 @@ User supplied session 202610021824303_E9E53B2C (~34.4 s). Verified 49 ACC TYPE_1
 ## Compact interface update 2026-10-04
 
 Compact Live, device detail diagnostics/recording controls, persistent display/recording preferences, H10 gravity calibration and a shared active/saved signal timeline are present in source. Runtime validation is pending until this installer completes; hardware and overnight validation remain pending. Display choices do not disable recording. Calibration/configuration snapshots accompany sessions.
+
+## State feedback foundation 2026-10-05
+
+Added optional session context and defined 0–10 pre/live/post feedback. Live opens a compact rating sheet; Start and Stop remain independent of feedback. Append-only state_feedback.jsonl preserves question definitions, goal, phase, event/entry times and stable session identity; exports and existing JSONL phone sync retain the journal. Phone History supports current-time follow-ups for stopped sessions; Windows provides a read-only viewer. Legacy sessions have no invented answers. Persistent presets, full experience switching, timeline overlays and backend uploads remain pending. See [state-feedback-and-upload-contract.md](state-feedback-and-upload-contract.md).
+
+Validation: matching Dart 3.13.4 formatting/parsing and standalone journal checks passed (11 ordered writes including zero, unique event IDs, corruption preservation). Full Flutter analysis/tests/build could not run: pub.dev access was blocked and required dependencies are absent from cache. New regression tests are included; the PC installer gates builds on analysis and the full test suite. Physical phone and Windows validation remain required.
+
+## Activity marker update
+
+Start remains immediate without setup. Add activity buttons through Quick markers: yoga, resistance training, breathwork, sound bowls, meditation, stretching, running, steam room, sauna, swimming, pickleball, walking, cycling, haptics, audio and rest. Existing user lists are not replaced. Custom labels, add/remove/rename and persistence remain supported. Most-used favorites sort first; equal usage counts retain the saved ordering. The compact Live row scrolls horizontally to reach all favorites. Usage increments only after a successful marker write. Old definitions read with zero usage and no activity ID. Past event labels/IDs remain immutable.
+
+Catalog activity markers add activity_id, activity_schema_version 1 and activity_action mark to existing marked_event rows. These are instant observations, not inferred start/stop intervals. Custom markers retain stable marker_definition_id and label snapshots without inventing an activity category. Backend event ingestion must preserve these fields. Explicit duration/start/stop controls remain pending.
+
+## Marker manager layout repair 2026-10-05
+
+User PC: Flutter analysis passed, 133 tests passed and the existing marker-manager widget test failed because the expanded activity catalog displaced saved markers. Moved the catalog below favorites into an initially collapsed expansion. Existing regression test is retained; full rerun/build remain pending. Repair package verifies source hashes and resumes the applied update without another cherry-pick.
+
+## 2026-10-05 — HostGator deployment and Windows upload foundation
+
+User confirmed HostGator installation in the existing valentfx_desiredstate MySQL 5.7 database: PHP lint, schema version 1, HTTPS health and the synthetic integration test passed. The test covered authentication, unknown upload, resumable chunks, stale offsets, corrupted chunk rejection, final SHA256 and immutable verified files. Source is versioned under server/hostgator; generated private backend.php, upload-token.txt and stored logs remain outside Git and public_html.
+
+Windows Analyze now exposes Upload selected session for a completed recording. A separate screen prepares an immutable temporary snapshot, hashes every top-level JSON/JSONL file in a worker isolate, sends bounded 2 MiB chunks, resumes from server offsets after uncertain acknowledgments, and checks final verified status/hash/size per file. Matching revisions do not transfer twice. Local originals remain intact and a credential-free receipt is saved in desired_state_desktop/upload-receipts. This verifies individual files, not an atomic complete-session revision.
+
+Run tools/configure_backend_upload.ps1 once on the work PC. It transfers the existing private token through SSH into a user-restricted temporary directory, protects it with Windows DPAPI CurrentUser in LOCALAPPDATA/DesiredState/backend-token.dpapi, and removes the temporary plaintext. The app decrypts it in a captured process without displaying/logging it. Credentials do not sit in OneDrive recordings or the repository. HTTPS destination is fixed to the deployed valentfx.com endpoint and redirects are not followed.
+
+Standalone matching-Dart uploader analysis and eight tests passed using cached crypto 3.0.7 in an isolated harness. The app keeps its existing crypto 3.0.6 dependency; full Flutter analysis/tests and Windows build with that exact dependency remain PC installer gates. Windows credential handling and one real completed-session transfer are not yet verified. Automatic uploads, profile reconciliation, event indexing, account onboarding, large-file host timing and off-host backup/restore remain pending. Participant-default and Stop UI changes previously discussed are deferred and are not included.
+
+## Home Windows upload validation 2026-10-05
+Flutter analysis passed, all 142 tests passed, and the Windows release build succeeded. Android APK build remains blocked because the configured desired-state-home-debug.keystore is missing on this PC. No Android installation performed. Windows credential setup and a real-session upload remain pending.
