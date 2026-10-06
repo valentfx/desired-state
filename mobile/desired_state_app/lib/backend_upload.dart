@@ -285,7 +285,7 @@ class BackendUploader {
     if (session['session_id'] != snapshot.sessionId) {
       throw const FormatException('Backend session identity mismatch');
     }
-    var completed = 0, verified = 0;
+    var completed = 0, verified = 0, transferred = 0, alreadyStored = 0;
     final receipts = <Map<String, dynamic>>[];
     for (final file in snapshot.files) {
       control.check();
@@ -308,6 +308,10 @@ class BackendUploader {
         throw const FormatException('Invalid backend upload metadata');
       }
       var offset = _offset(init, file.bytes), attempts = 0;
+      final previouslyVerified = init['status'] == 'verified';
+      if (previouslyVerified) {
+        alreadyStored++;
+      }
       final reader = await File(file.path).open();
       try {
         while (offset < file.bytes) {
@@ -339,6 +343,7 @@ class BackendUploader {
             if (next != offset + bytes.length) {
               throw const FormatException('Unexpected backend acknowledgment');
             }
+            transferred += bytes.length;
             offset = next;
             attempts = 0;
           } catch (e) {
@@ -349,7 +354,10 @@ class BackendUploader {
             control.check();
             final status = await api.call('status', uploadId: id);
             final next = _offset(status, file.bytes);
-            if (next > offset) attempts = 0;
+            if (next > offset) {
+              transferred += next - offset;
+              attempts = 0;
+            }
             offset = next;
           }
         }
@@ -392,6 +400,8 @@ class BackendUploader {
       'verified_utc': DateTime.now().toUtc().toIso8601String(),
       'files': receipts,
       'total_bytes': completed,
+      'transferred_bytes': transferred,
+      'already_stored_files': alreadyStored,
       'verification_scope': 'each_original_file; not_atomic_session_revision',
     };
   }

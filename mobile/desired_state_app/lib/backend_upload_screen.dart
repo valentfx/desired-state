@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import 'backend_upload.dart';
+import 'upload_status.dart';
 
 class BackendUploadScreen extends StatefulWidget {
   const BackendUploadScreen({
@@ -43,6 +44,7 @@ class _BackendUploadScreenState extends State<BackendUploadScreen> {
     UploadSnapshot? snapshot;
     HttpUploadApi? api;
     try {
+      await writeUploadState(widget.directory, widget.sessionId, 'uploading');
       final token = await readWindowsUploadToken();
       control.check();
       snapshot = await snapshotUpload(widget.directory.path);
@@ -80,10 +82,19 @@ class _BackendUploadScreenState extends State<BackendUploadScreen> {
           _success = true;
           _receipt = file.path;
           _message =
-              'Uploaded and verified ${snapshot!.files.length} files. Local originals retained.';
+              'Verified ${snapshot!.files.length} files. Already stored: ${receipt['already_stored_files']} files. New data transferred: ${((receipt['transferred_bytes'] as int) / 1048576).toStringAsFixed(2)} MB. Local originals retained.';
         });
       }
     } catch (e) {
+      try {
+        await writeUploadState(
+          widget.directory,
+          widget.sessionId,
+          e is UploadCancelled ? 'paused' : 'failed',
+        );
+      } catch (_) {
+        // Reporting failure must not hide the original upload error.
+      }
       if (mounted) setState(() => _message = '$e');
     } finally {
       api?.close();

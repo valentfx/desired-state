@@ -125,8 +125,11 @@ void main() {
       expect(progress.last.completed, snapshot.totalBytes);
       expect(progress.last.verified, snapshot.files.length);
       final calls = api.chunkCalls;
-      await BackendUploader(api)
+      final repeated = await BackendUploader(api)
           .upload(snapshot, control: UploadControl(), onProgress: (_) {});
+      expect(repeated['transferred_bytes'], 0);
+      expect(repeated['already_stored_files'], snapshot.files.length);
+      expect(receipt['transferred_bytes'], snapshot.totalBytes);
       expect(api.chunkCalls, calls); // Same revision does not transfer twice.
       expect(jsonEncode(receipt), isNot(contains('Bearer')));
     } finally {

@@ -349,3 +349,9 @@ Validation: standalone Dart 3.13.4 analysis and eight uploader tests passed (sna
 
 ## Home Windows upload validation 2026-10-05
 Flutter analysis passed, all 142 tests passed, and the Windows release build succeeded. Android APK build remains blocked because the configured desired-state-home-debug.keystore is missing on this PC. No Android installation performed. Windows credential setup and a real-session upload remain pending.
+
+## Windows upload status update
+2026-10-05: Windows session upload status from verification receipts; hash checks run off the UI isolate and detect added/missing/changed files. Pause/failure state persists; repeat-upload results separate already-stored files and newly confirmed bytes. Existing raw logs/credentials/backend are unchanged. Local diff checks passed; Flutter checks/build are installer gates. Source commit c2079aa. User confirmed prior home analysis/142 tests/Windows build and real upload; this follow-up still needs PC validation. Compression remains pending.
+
+
+Windows upload status validation: formatting, analysis, full tests and clean Windows release build passed on this PC. No Android build, automatic commit or push performed.
