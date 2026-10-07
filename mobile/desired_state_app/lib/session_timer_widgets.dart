@@ -48,40 +48,57 @@ class _SessionTimerSetupState extends State<SessionTimerSetup> {
     // Local form state avoids a text-controller lifetime tied to dialog animation.
     var minutes = '${preference.minutes}';
     var vibrate = preference.vibrate;
+    final minutesFieldKey = GlobalKey<FormFieldState<String>>();
     final key = GlobalKey<FormState>();
     final value = await showDialog<SessionTimerPreference>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, update) => AlertDialog(
           title: const Text('Session timer'),
-          content: Form(
-            key: key,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextFormField(
-                  initialValue: minutes,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Minutes (1–1440)',
+          content: SingleChildScrollView(
+            child: Form(
+              key: key,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextFormField(
+                    key: minutesFieldKey,
+                    initialValue: minutes,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Minutes (1–1440)',
+                    ),
+                    onChanged: (value) => minutes = value,
+                    validator: (value) {
+                      final n = int.tryParse(value ?? '');
+                      return n == null || n < 1 || n > 1440
+                          ? 'Enter 1–1440 minutes'
+                          : null;
+                    },
                   ),
-                  onChanged: (value) => minutes = value,
-                  validator: (value) {
-                    final n = int.tryParse(value ?? '');
-                    return n == null || n < 1 || n > 1440
-                        ? 'Enter 1–1440 minutes'
-                        : null;
-                  },
-                ),
-                SwitchListTile(
-                  title: const Text('Vibrate at completion'),
-                  value: vibrate,
-                  onChanged: (value) => update(() => vibrate = value),
-                ),
-                const Text(
-                  'A brief chime plays at completion. Recording continues until you press Stop.',
-                ),
-              ],
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      for (final duration in [5, 10, 20, 30, 60])
+                        ActionChip(
+                          label: Text('$duration min'),
+                          onPressed: () {
+                            minutes = '$duration';
+                            minutesFieldKey.currentState?.didChange(minutes);
+                          },
+                        ),
+                    ],
+                  ),
+                  SwitchListTile(
+                    title: const Text('Vibrate at completion'),
+                    value: vibrate,
+                    onChanged: (value) => update(() => vibrate = value),
+                  ),
+                  const Text(
+                    'A brief chime plays at completion. Recording continues until you press Stop.',
+                  ),
+                ],
+              ),
             ),
           ),
           actions: [
@@ -134,8 +151,14 @@ class _SessionTimerSetupState extends State<SessionTimerSetup> {
   Widget build(BuildContext context) => Column(
     children: [
       SwitchListTile(
-        title: const Text('Optional session timer'),
-        subtitle: Text('${preference.minutes} minutes · pauses with recording'),
+        title: InkWell(
+          onTap: saving ? null : _edit,
+          child: const Text('Optional session timer'),
+        ),
+        subtitle: InkWell(
+          onTap: saving ? null : _edit,
+          child: Text('${preference.minutes} minutes · pauses with recording'),
+        ),
         value: enabled,
         onChanged: saving
             ? null
@@ -147,7 +170,7 @@ class _SessionTimerSetupState extends State<SessionTimerSetup> {
                 _configure();
               },
         secondary: IconButton(
-          tooltip: 'Set timer duration',
+          tooltip: 'Customize timer',
           onPressed: saving ? null : _edit,
           icon: const Icon(Icons.timer_outlined),
         ),

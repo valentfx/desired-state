@@ -403,3 +403,9 @@ Package compatibility repair: fetched work-PC c2105df and reconciled the timer/m
 Timer/metrics/EEG quality validation: Flutter analysis, full tests, Windows release and Android debug APK builds passed on this PC. Shared phone upgraded in place. Hardware alert/quality acceptance remains pending.
 
 Timer/metrics/EEG quality validation: Flutter analysis, full tests, Windows release and Android debug APK builds passed on this PC. Shared phone upgraded in place. Hardware alert/quality acceptance remains pending.
+
+## 2026-10-07 — Restore compact Live layout without removing diagnostics
+Moved added filter-status card into Metric details and retained EEG quality checks there while removing its duplicate from the compact EEG card. Reviewed RR filter activation: saveProcessing persists configuration/notifies; ProcessingScreen detects config changes and reprocesses retained inputs. No acquisition, screening thresholds, notch filters or timer behavior changed. Verification here: scoped diff, source structure checks and ZIP integrity. Flutter unavailable locally; guarded installer runs analysis, full tests and both builds before in-place phone upgrade and scoped commit.
+Timer customization: the existing label/subtitle opens the dialog; presets 5/10/20/30/60 minutes supplement custom 1–1440-minute input. Duration/vibration persistence unchanged. Android completion uses the existing 700ms ToneGenerator chime on STREAM_MUSIC and optional 400ms vibration; audibility depends on media volume/output and hardware validation remains pending. No added live rows.
+
+Compact Live layout validation: Flutter analysis, full tests, Windows release and Android debug APK builds passed on this PC. Shared phone upgraded in place. Phone viewport and detail access confirmation remain pending.

@@ -420,7 +420,6 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
         padding: const EdgeInsets.all(8),
         children: [
           ...widget.header,
-          _appliedStatus(config),
           panel(
             310.0 +
                 (summaries.length - 2).clamp(0, 99) * 24 +
@@ -432,6 +431,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
               'Native units · numeric axes · visible min/max',
             ),
             children: [
+              _appliedStatus(config),
               for (final entry in series.entries)
                 HistoryPlot(
                   title: entry.key == 'HR' ? 'Heart rate' : entry.key,

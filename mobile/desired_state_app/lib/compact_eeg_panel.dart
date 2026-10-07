@@ -1,5 +1,3 @@
-import 'eeg_quality_panel.dart';
-
 import 'package:flutter/material.dart';
 
 import 'eeg_live_panel.dart';
@@ -82,7 +80,6 @@ class CompactEegPanel extends StatelessWidget {
               'Share of 1–30 Hz power · not a state score',
               style: TextStyle(fontSize: 10),
             ),
-            EegQualityPanel(controller: controller),
             Wrap(
               spacing: 12,
               children: [
