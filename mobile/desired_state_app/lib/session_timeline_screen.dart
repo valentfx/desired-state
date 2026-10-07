@@ -9,11 +9,13 @@ import 'package:flutter/foundation.dart';
 
 import 'eeg_live_panel.dart';
 import 'session_controller.dart';
+import 'recorded_posture.dart';
 
 class TimelineReader {
   final Map<String, int> _offsets = {};
   final Map<String, String> _segments = {};
   final Map<String, List<(double, double)>> _cache = {};
+  final List<Map<String, dynamic>> _postureEvents = [];
   double? _lastStart;
   final List<(double, bool)> _rrWindow = [];
   int? _rrSegment;
@@ -56,6 +58,7 @@ class TimelineReader {
     if (!incremental || _lastStart == null || start < _lastStart!) {
       _offsets.clear();
       _cache.clear();
+      _postureEvents.clear();
       _rrWindow.clear();
       _rrSegment = null;
       _segments.clear();
@@ -131,6 +134,9 @@ class TimelineReader {
           try {
             final row =
                 jsonDecode(utf8.decode(pending)) as Map<String, dynamic>;
+            if (name == 'events') {
+              _postureEvents.add(row);
+            }
             rowSegment =
                 '$name:${row['continuity_segment'] ?? 0}:${row['recording_segment'] ?? 0}';
             final timestamp = DateTime.tryParse('${row['received_utc']}');
@@ -248,6 +254,10 @@ class TimelineReader {
     }
     for (final points in _cache.values) {
       points.removeWhere((v) => v.$1 < start);
+    }
+    final posture = recordedPosturePoints(_postureEvents, origin, start, end);
+    if (posture.isNotEmpty) {
+      _cache['Sleep position (recorded estimate)'] = posture;
     }
     return {
       for (final entry in _cache.entries) entry.key: List.of(entry.value),
@@ -505,6 +515,11 @@ class _SessionTimelineScreenState extends State<SessionTimelineScreen> {
         ),
         if (_loading) const LinearProgressIndicator(),
         if (_error != null) Text(_error!),
+        if (!_loading &&
+            !_data.containsKey('Sleep position (recorded estimate)'))
+          const Text(
+            'No recorded posture estimates. Raw acceleration may be available under motion. Older recordings are not automatically assigned positions; calibrated H10 estimates are needed.',
+          ),
         if (_data.isEmpty && !_loading)
           const Text('No saved samples in this interval.'),
         for (final entry in _data.entries)
@@ -538,6 +553,10 @@ class _SessionTimelineScreenState extends State<SessionTimelineScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(title, style: Theme.of(context).textTheme.titleSmall),
+        if (title == 'Sleep position (recorded estimate)')
+          const Text(
+            '0 Unknown · 1 On back · 2 Right side · 3 Left side · 4 Upright · 5 Prone · 6 Uncalibrated. Recorded estimates, not sleep stages.',
+          ),
         SizedBox(
           height: 150,
           width: double.infinity,

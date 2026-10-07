@@ -124,7 +124,7 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
           const ListTile(
             title: Text('Save these acquired streams'),
             subtitle: Text(
-              'Signals stay available in diagnostics. Changes during recording are timestamped.',
+              'Signals stay available in Metric details and diagnostics. ECG is off for new settings; saved choices are retained. Posture estimates can be saved without raw acceleration. Changes during recording are timestamped.',
             ),
           ),
           for (final key in widget.streams!)

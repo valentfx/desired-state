@@ -28,8 +28,11 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('Scan for devices'), findsNothing);
-      await tester.tap(find.text('Connect devices'));
-      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Connect devices'));
+      await tester.pump();
+      await tester.tap(find.text('Connect devices').hitTestable());
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
       expect(find.text('Devices'), findsOneWidget);
       expect(find.text('Polar H10'), findsOneWidget);
       expect(find.text('O2Ring'), findsOneWidget);

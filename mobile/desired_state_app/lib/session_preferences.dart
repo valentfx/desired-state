@@ -6,7 +6,8 @@ import 'package:path_provider/path_provider.dart';
 const recordingStreams = <String, String>{
   'heart': 'Heart rate and RR intervals',
   'ecg': 'ECG waveform',
-  'acc': 'Acceleration and posture',
+  'acc': 'Acceleration samples',
+  'posture': 'Posture estimates',
   'ring': 'Oxygen and pulse',
   'muse': 'EEG, bands and head motion',
   'pmd': 'H10 raw protocol packets',
@@ -18,19 +19,19 @@ class SessionPreferences {
     this.showEeg = true,
     this.showOxygen = true,
     this.showPosture = true,
-  }) : recording = recording ?? recordingStreams.keys.toSet();
+  }) : recording = recording ?? (recordingStreams.keys.toSet()..remove('ecg'));
   final Set<String> recording;
   final bool showEeg, showOxygen, showPosture;
   bool records(String stream) => recording.contains(stream);
   Map<String, dynamic> toJson() => {
-    'schema_version': 1,
+    'schema_version': 2,
     'recording': recording.toList()..sort(),
     'show_eeg': showEeg,
     'show_oxygen': showOxygen,
     'show_posture': showPosture,
   };
   factory SessionPreferences.fromJson(Map<String, dynamic> json) {
-    if (json['schema_version'] != 1 ||
+    if (![1, 2].contains(json['schema_version']) ||
         json['recording'] is! List ||
         ![
           'show_eeg',
@@ -40,6 +41,10 @@ class SessionPreferences {
       throw const FormatException('Unsupported or damaged session preferences');
     }
     final selected = (json['recording'] as List).cast<String>().toSet();
+    // Version 1 coupled posture logging to acceleration; preserve that choice.
+    if (json['schema_version'] == 1 && selected.contains('acc')) {
+      selected.add('posture');
+    }
     if (!selected.every(recordingStreams.containsKey)) {
       throw const FormatException('Unknown recording stream');
     }

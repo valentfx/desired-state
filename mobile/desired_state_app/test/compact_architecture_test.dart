@@ -84,6 +84,7 @@ void main() {
         final now = DateTime.now();
         c.museAthena.streaming = true;
         c.museAthena.lastSamplesAt = now;
+        c.eventTimes.add(now.subtract(const Duration(seconds: 1)));
         final power = {
           'Delta': 40.0,
           'Theta': 30.0,
@@ -114,6 +115,7 @@ void main() {
         expect(painter.maximum, 100);
         expect(painter.yLabel, '%');
         expect(painter.showPoints, isFalse);
+        expect(painter.events, [59.0]);
         expect(painter.series['Delta']!.first.$2, 40);
         expect(painter.series.values.every((p) => p.last.$2.isNaN), isTrue);
         expect(find.text('EEG · poor or stale signal'), findsOneWidget);

@@ -51,7 +51,7 @@ class DeviceDetailScreen extends StatelessWidget {
                 builder: (_) => PreferencesScreen(
                   controller: controller,
                   streams: kind == 'h10'
-                      ? ['heart', 'ecg', 'acc', 'pmd']
+                      ? ['heart', 'ecg', 'acc', 'posture', 'pmd']
                       : kind == 'ring'
                       ? ['ring']
                       : ['muse'],

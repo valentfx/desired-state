@@ -19,6 +19,7 @@ import 'processing.dart';
 import 'muse_athena_service.dart';
 import 'session_preferences.dart';
 import 'posture_calibration.dart';
+import 'session_timer.dart';
 import 'session_history.dart';
 import 'participant_tools.dart';
 import 'practice_controller.dart';
@@ -113,7 +114,7 @@ class SessionController extends ChangeNotifier {
           : 'Uncalibrated';
       if (nextPosture != posture) {
         posture = nextPosture;
-        if (_recording && preferences.records('acc')) {
+        if (_recording && preferences.records('posture')) {
           _event(
             'posture_estimate',
             description: jsonEncode({
@@ -211,7 +212,16 @@ class SessionController extends ChangeNotifier {
           preferences.records('pmd') &&
           logger != null &&
           polarId != null) {
-        _save(logger.logPmdPacket(deviceId: polarId!, packet: packet));
+        // ECG waveform recording off also excludes ECG PMD data payloads.
+        // Control packets remain available for diagnosing negotiation.
+        final ecgPayload =
+            packet.characteristic.toLowerCase() ==
+                'fb005c82-02e7-f387-1cad-8acd2d8df0c8' &&
+            packet.bytes.isNotEmpty &&
+            packet.bytes.first == 0;
+        if (!ecgPayload || preferences.records('ecg')) {
+          _save(logger.logPmdPacket(deviceId: polarId!, packet: packet));
+        }
       }
     });
     _accStatusSubscription = polar.accelerationStatusStream.listen((status) {
@@ -242,6 +252,34 @@ class SessionController extends ChangeNotifier {
               const Duration(seconds: 5)
       ? posture
       : 'Unknown';
+  late final sessionCountdown = SessionCountdown(clock: elapsedClock);
+  Duration? nextTimerDuration;
+  bool nextTimerVibrate = true;
+  bool _timerVibrate = true;
+  Future<void> _alertTimer() async {
+    try {
+      await _foreground.timerAlert(vibrate: _timerVibrate);
+    } catch (failure) {
+      error = 'Timer finished; alert unavailable: $failure';
+      _changed();
+    }
+  }
+
+  void _checkSessionTimer() {
+    if (sessionLogger != null && sessionCountdown.checkCompletion()) {
+      _event(
+        'session_timer_completed',
+        description: jsonEncode({
+          'schema_version': 1,
+          'duration_seconds': sessionCountdown.duration!.inSeconds,
+          'active_elapsed_seconds': sessionCountdown.elapsed.inSeconds,
+          'recording_continues': true,
+        }),
+      );
+      unawaited(_alertTimer());
+    }
+  }
+
   bool _preferencesLoaded = false;
   final previewRr = RrHistory();
   final List<(DateTime, double)> heartTrend = [],
@@ -876,6 +914,34 @@ class SessionController extends ChangeNotifier {
       _segment = 0;
       sessionStartedAt = DateTime.now();
       recordingState = RecordingState.recording;
+      sessionCountdown.clear();
+      final timerDuration = nextTimerDuration;
+      if (timerDuration != null) {
+        sessionCountdown.start(timerDuration);
+        _timerVibrate = nextTimerVibrate;
+        _event(
+          'session_timer_started',
+          description: jsonEncode({
+            'schema_version': 1,
+            'duration_seconds': timerDuration.inSeconds,
+            'clock': 'active_monotonic',
+            'vibrate': _timerVibrate,
+          }),
+        );
+      }
+      // Save the current estimate even if the calibrated position has not changed.
+      if (preferences.records('posture')) {
+        posture = currentPosture;
+        _event(
+          'posture_estimate',
+          description: jsonEncode({
+            'position': currentPosture,
+            'calibration_id': activeCalibration?.id,
+            'method': 'gravity_nearest_angle_v1',
+            'derived': true,
+          }),
+        );
+      }
       status = 'Recording';
       _exhausted = false;
       _waitingSince = _now;
@@ -893,6 +959,7 @@ class SessionController extends ChangeNotifier {
   }
 
   void _break(String reason) {
+    posture = 'Unknown';
     _ecgSegment++;
     _accSegment++;
     if (_gap) {
@@ -996,6 +1063,7 @@ class SessionController extends ChangeNotifier {
   }
 
   void _tick() {
+    _checkSessionTimer();
     if (_recording &&
         !_ringManualDisconnect &&
         !_ringConnectInFlight &&
@@ -1151,6 +1219,11 @@ class SessionController extends ChangeNotifier {
     if (!_recording || busy) {
       return;
     }
+    _checkSessionTimer();
+    sessionCountdown.pause();
+    if (sessionCountdown.duration != null && !sessionCountdown.completed) {
+      _event('session_timer_paused');
+    }
     practice.pause();
     recordingState = RecordingState.paused;
     _cancelRecovery();
@@ -1166,6 +1239,10 @@ class SessionController extends ChangeNotifier {
     _eegRecordingSince = DateTime.now().toUtc();
     _ecgRecordingSince = _eegRecordingSince;
     recordingState = RecordingState.recording;
+    sessionCountdown.resume();
+    if (sessionCountdown.duration != null && !sessionCountdown.completed) {
+      _event('session_timer_resumed');
+    }
     _event('session_resumed');
     _exhausted = false;
     _waitingSince = _now;
@@ -1249,6 +1326,16 @@ class SessionController extends ChangeNotifier {
       return;
     }
     busy = true;
+    _checkSessionTimer();
+    if (sessionCountdown.duration != null && !sessionCountdown.completed) {
+      _event(
+        'session_timer_cancelled',
+        description: jsonEncode({
+          'remaining_seconds': sessionCountdown.remaining.inSeconds,
+        }),
+      );
+    }
+    sessionCountdown.pause();
     recordingState = RecordingState.stopped;
     _cancelRecovery();
     final logger = sessionLogger!;

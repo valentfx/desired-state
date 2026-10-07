@@ -71,7 +71,15 @@ class SettingsScreen extends StatelessWidget {
             MaterialPageRoute<void>(
               builder: (_) => PreferencesScreen(
                 controller: controller,
-                streams: const ['heart', 'ecg', 'acc', 'ring', 'muse', 'pmd'],
+                streams: const [
+                  'heart',
+                  'ecg',
+                  'acc',
+                  'posture',
+                  'ring',
+                  'muse',
+                  'pmd',
+                ],
               ),
             ),
           ),

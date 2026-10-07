@@ -1,3 +1,5 @@
+import 'eeg_quality_panel.dart';
+
 import 'package:flutter/material.dart';
 
 import 'eeg_live_panel.dart';
@@ -56,6 +58,12 @@ class CompactEegPanel extends StatelessWidget {
               child: CustomPaint(
                 painter: EegAxisPainter(
                   series,
+                  events: controller.eventTimes
+                      .map(
+                        (time) =>
+                            time.difference(start).inMicroseconds / 1000000,
+                      )
+                      .toList(),
                   left: 0,
                   right: 60,
                   minimum: 0,
@@ -74,6 +82,7 @@ class CompactEegPanel extends StatelessWidget {
               'Share of 1–30 Hz power · not a state score',
               style: TextStyle(fontSize: 10),
             ),
+            EegQualityPanel(controller: controller),
             Wrap(
               spacing: 12,
               children: [

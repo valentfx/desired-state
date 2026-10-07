@@ -221,6 +221,12 @@ class _EegLivePanelState extends State<EegLivePanel> {
               child: CustomPaint(
                 painter: EegAxisPainter(
                   plotted,
+                  events: widget.controller.eventTimes
+                      .map(
+                        (time) =>
+                            time.difference(firstTime).inMicroseconds / 1000000,
+                      )
+                      .toList(),
                   left: left,
                   right: math.max(left + 1, right),
                   minimum: 0,
@@ -354,6 +360,15 @@ class _EegLivePanelState extends State<EegLivePanel> {
           child: CustomPaint(
             painter: EegAxisPainter(
               series,
+              events: widget.controller.eventTimes
+                  .map(
+                    (time) =>
+                        time
+                            .difference(muse.lastSamplesAt ?? DateTime.now())
+                            .inMicroseconds /
+                        1000000,
+                  )
+                  .toList(),
               left: -1024 / math.max(1, muse.eegRate),
               right: 0,
               minimum: -limit,
@@ -451,7 +466,9 @@ class EegAxisPainter extends CustomPainter {
       canvas.drawLine(
         Offset(x(event), area.top),
         Offset(x(event), area.bottom),
-        Paint()..color = Colors.purple.withValues(alpha: .4),
+        Paint()
+          ..color = Colors.black87
+          ..strokeWidth = 2,
       );
     }
     for (final entry in series.entries) {

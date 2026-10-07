@@ -10,6 +10,7 @@ import 'processing.dart';
 import 'session_controller.dart';
 import 'session_history.dart';
 import 'history_plot.dart';
+import 'metric_sensors_panel.dart';
 
 /// One configurable view for live inputs and reopened immutable session rows.
 class ProcessingScreen extends StatefulWidget {
@@ -152,6 +153,23 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
         setState(() => _saving = false);
       }
     }
+  }
+
+  Widget _appliedStatus(ProcessingConfig config) {
+    final accepted = _processor?.results.where((r) => r.accepted).length ?? 0;
+    final total = _processor?.results.length ?? 0;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Text(
+          'Applied RR filter: ${config.mode.name} · $accepted/$total accepted, ${total - accepted} excluded\n'
+          '${config.mode == AnalysisMode.raw ? 'No range/deviation screening' : 'Range ${config.minimum}–${config.maximum} ms'}'
+          '${config.mode == AnalysisMode.screened ? ' · deviation ${config.deviation}% · reference ${config.reference} beats' : ''}'
+          ' · HRV window ${config.windowSeconds}s\n'
+          'Changes apply after Apply & save and recompute this view. Measured BPM, EEG and ECG waveforms stay unchanged.',
+        ),
+      ),
+    );
   }
 
   @override
@@ -402,13 +420,14 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
         padding: const EdgeInsets.all(8),
         children: [
           ...widget.header,
+          _appliedStatus(config),
           panel(
             310.0 +
                 (summaries.length - 2).clamp(0, 99) * 24 +
                 (MediaQuery.textScalerOf(context).scale(14) - 14) * 12,
           ),
           ExpansionTile(
-            title: const Text('BPM & HRV details'),
+            title: const Text('Metric details'),
             subtitle: const Text(
               'Native units · numeric axes · visible min/max',
             ),
@@ -430,10 +449,12 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                     _right = end;
                   }),
                 ),
+              if (widget.session == null)
+                MetricSensorsPanel(controller: widget.controller),
               const Padding(
                 padding: EdgeInsets.all(12),
                 child: Text(
-                  'Select HRV values in Filters & metrics. Open Devices → Polar H10 for the acquired ECG.',
+                  'Select HRV values in Filters & metrics. Saving ECG, acceleration and posture is controlled independently in Settings → Recording settings.',
                 ),
               ),
             ],
@@ -458,6 +479,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
               padding: const EdgeInsets.all(12),
               children: [
                 ...widget.header,
+                _appliedStatus(config),
                 Row(
                   children: [
                     const Expanded(child: Text('Filters & metrics')),

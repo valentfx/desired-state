@@ -785,6 +785,9 @@ class _HistoryDetailScreenState extends State<HistoryDetailScreen> {
                 return ListView(
                   padding: const EdgeInsets.all(12),
                   children: [
+                    const Text(
+                      'Summary uses recorded RR screening. Analysis tools recompute RR/HRV with the applied filter; raw sensor plots stay unchanged.',
+                    ),
                     Text(
                       entry.participant,
                       style: Theme.of(context).textTheme.titleLarge,

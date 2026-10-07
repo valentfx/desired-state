@@ -7,6 +7,52 @@ const eegBands = <String, (double, double)>{
   'Beta': (13, 30),
 };
 
+/// Uses the same window and limits as band-power processing. This is an
+/// artifact screen, not electrode impedance or a clinical quality measure.
+class EegWindowQuality {
+  const EegWindowQuality(this.samples, this.reason);
+  final int samples;
+  final String? reason;
+  bool get usable => reason == null;
+}
+
+EegWindowQuality assessEegWindow(
+  List<double> samples,
+  int rate, {
+  int maximumSamples = 1024,
+}) {
+  if (rate < 64) {
+    return const EegWindowQuality(0, 'Waiting for sample rate');
+  }
+  var n = 1;
+  while (n * 2 <= samples.length && n * 2 <= maximumSamples) {
+    n *= 2;
+  }
+  if (n < rate * 2) {
+    return EegWindowQuality(n, 'Waiting for at least 2 seconds');
+  }
+  final source = samples.sublist(samples.length - n);
+  if (source.any((v) => !v.isFinite)) {
+    return EegWindowQuality(n, 'Invalid sample');
+  }
+  final mean = source.reduce((a, b) => a + b) / n;
+  var variance = 0.0;
+  for (var i = 0; i < n; i++) {
+    final centered = source[i] - mean;
+    if (centered.abs() > 250) {
+      return EegWindowQuality(n, 'Large amplitude (>250 µV centered)');
+    }
+    if (i > 0 && (source[i] - source[i - 1]).abs() > 150) {
+      return EegWindowQuality(n, 'Abrupt change (>150 µV/sample)');
+    }
+    variance += centered * centered;
+  }
+  if (variance / n < 0.01) {
+    return EegWindowQuality(n, 'Flat signal (variance <0.01 µV²)');
+  }
+  return EegWindowQuality(n, null);
+}
+
 /// Detrended Hann-window periodogram, one-sided power in microvolts squared.
 /// All bands use identical samples, window normalization and channel scaling.
 Map<String, double>? eegBandPower(
@@ -14,29 +60,24 @@ Map<String, double>? eegBandPower(
   int rate, {
   int maximumSamples = 1024,
 }) {
-  if (rate < 64 || samples.length < rate * 2) return null;
-  var n = 1;
-  while (n * 2 <= samples.length && n * 2 <= maximumSamples) {
-    n *= 2;
+  final quality = assessEegWindow(
+    samples,
+    rate,
+    maximumSamples: maximumSamples,
+  );
+  if (!quality.usable) {
+    return null;
   }
-  if (n < rate * 2) return null;
+  final n = quality.samples;
   final source = samples.sublist(samples.length - n);
-  if (source.any((v) => !v.isFinite)) return null;
   final mean = source.reduce((a, b) => a + b) / n;
   final real = List<double>.filled(n, 0), imaginary = List<double>.filled(n, 0);
-  var windowEnergy = 0.0, variance = 0.0;
+  var windowEnergy = 0.0;
   for (var i = 0; i < n; i++) {
-    final centered = source[i] - mean;
-    if (centered.abs() > 250 ||
-        (i > 0 && (source[i] - source[i - 1]).abs() > 150)) {
-      return null;
-    }
-    variance += centered * centered;
     final weight = 0.5 - 0.5 * math.cos(2 * math.pi * i / (n - 1));
-    real[i] = centered * weight;
+    real[i] = (source[i] - mean) * weight;
     windowEnergy += weight * weight;
   }
-  if (variance / n < 0.01) return null;
   for (var i = 1, j = 0; i < n; i++) {
     var bit = n >> 1;
     while ((j & bit) != 0) {

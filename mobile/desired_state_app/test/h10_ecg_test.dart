@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:desired_state_app/h10_ecg.dart';
 import 'package:desired_state_app/session_controller.dart';
 import 'package:desired_state_app/session_history.dart';
+import 'package:desired_state_app/session_preferences.dart';
 
 import 'session_controller_test.dart' show FakePolar, FakeForeground, rows;
 
@@ -81,6 +82,9 @@ void main() {
       );
       try {
         await c.connect(BluetoothDevice.fromId('ECG-H10'));
+        await c.savePreferences(
+          SessionPreferences(recording: recordingStreams.keys.toSet()),
+        );
         await c.start(participantName: 'Original');
         final logger = c.sessionLogger!;
         polar.emitEcg([

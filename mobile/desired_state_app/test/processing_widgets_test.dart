@@ -66,8 +66,18 @@ void main() {
       await tester.tap(find.text('Processing & plots'));
       await settleIo(
         tester,
+        () => find.text('Filters & metrics').evaluate().isNotEmpty,
+      );
+      await tester.scrollUntilVisible(
+        find.textContaining('receipt-time window'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await settleIo(
+        tester,
         () => find.textContaining('receipt-time window').evaluate().isNotEmpty,
       );
+      await tester.ensureVisible(find.byTooltip('Processing settings'));
       await tester.tap(find.byTooltip('Processing settings'));
       await tester.pumpAndSettle();
       await tester.tap(find.byType(DropdownButton<AnalysisMode>));
@@ -182,6 +192,7 @@ void main() {
         tester,
         () => find.textContaining('receipt-time window').evaluate().isNotEmpty,
       );
+      await tester.ensureVisible(find.byTooltip('Processing settings'));
       await tester.tap(find.byTooltip('Processing settings'));
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(

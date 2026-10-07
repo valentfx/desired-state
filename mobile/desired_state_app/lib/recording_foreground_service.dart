@@ -26,5 +26,13 @@ class RecordingForegroundService {
     });
   }
 
+  Future<void> timerAlert({required bool vibrate}) async {
+    try {
+      await _channel.invokeMethod<void>('timerAlert', {'vibrate': vibrate});
+    } on MissingPluginException {
+      await SystemSound.play(SystemSoundType.alert);
+    }
+  }
+
   Future<void> stop() => _channel.invokeMethod<void>('stop');
 }

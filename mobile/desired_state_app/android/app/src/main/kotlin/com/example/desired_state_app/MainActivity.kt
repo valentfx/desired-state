@@ -38,6 +38,13 @@ class MainActivity : FlutterActivity() {
                         startForegroundService(intent)
                         result.success(null)
                     }
+                    "timerAlert" -> {
+                        val intent = Intent(this, RecordingService::class.java)
+                            .setAction(RecordingService.ACTION_TIMER_ALERT)
+                            .putExtra("vibrate", call.argument<Boolean>("vibrate") ?: true)
+                        startForegroundService(intent)
+                        result.success(null)
+                    }
                     "stop" -> {
                         stopService(Intent(this, RecordingService::class.java))
                         result.success(null)

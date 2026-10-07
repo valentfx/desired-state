@@ -388,3 +388,16 @@ Analyze now owns Summary, Signals and Analysis tools sections; completion opens 
 Session structure test follow-up: updated renamed Session UI expectations, scoped participant dropdown selection and isolated the recording-type catalog fixture. Original analysis passed; full tests and builds pending resume. Test backup: F:\1dev\desired-state-session-test-fix-backup-20261007-153416.
 
 Session structure validation: Flutter analysis, full tests, Windows release and Android debug APK builds passed. Shared phone app upgraded in place and launched. Recording/type sync and UI hardware verification remain pending.
+
+## Timer and sensor display update — 2026-10-07
+Implemented optional active-time timer, completion chime/vibration and preserved recording for follow-up ratings; shared posture display on phone/Windows; independent ECG/posture recording controls and expanded Metric details. Fixed omitted event-time wiring in live EEG plots, preserving screened gaps and original data.
+Inspected user export 202610072200435_E9E53B2C: 17,812 ECG samples independently decoded correctly; four EEG channels each have 35,080 samples. 62 of 116 band windows lack four usable channels; marker was recorded correctly. User reports prior Session structure update installed successfully. Flutter/Dart are unavailable here; this update's analyzer/tests/builds and locked-screen alert acceptance remain pending.
+
+## EEG quality and applied filters — 2026-10-07
+EEG signal check appears in Session EEG and Metric details, with per-channel reasons and sample freshness. It shares the exact artifact gate and power-of-two window with band computation: at least two seconds, finite values, centered amplitude <=250 µV, adjacent step <=150 µV, variance >=0.01 µV². This is not a measured contact-impedance test. Band-share plots still require all channels to pass; acquisition/raw logging remain separate. No unscreened band estimates are substituted for failed windows.
+RR processing views now show the applied mode, limits, window and accepted/excluded counts. Apply & save recomputes the view; measured BPM and raw ECG/EEG plots are not changed by RR filters. Summary explicitly identifies recorded screening instead of implying it reflects current analysis settings. Quality-to-band gate tests added. Local source structure/diff checks pass; Flutter analysis, tests and builds must pass in the Windows installer before deployment. Hardware fit, audible timer and screen-locked behavior need acceptance testing.
+
+Package compatibility repair: fetched work-PC c2105df and reconciled the timer/metrics/quality changes with its exact source. Preserves current refinements and lint/format fixes. Three overlapping edits were reviewed: shared posture-helper extraction, optional timer placement and Summary filter explanation. Static checks pass; Flutter checks remain required in the installer.
+
+
+Timer/metrics/EEG quality validation: Flutter analysis, full tests, Windows release and Android debug APK builds passed on this PC. Shared phone upgraded in place. Hardware alert/quality acceptance remains pending.

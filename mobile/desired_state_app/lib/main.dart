@@ -19,6 +19,7 @@ import 'settings_screen.dart';
 import 'state_feedback.dart';
 import 'recording_types.dart';
 import 'recording_type_screen.dart';
+import 'session_timer_widgets.dart';
 import 'state_feedback_widgets.dart';
 
 void main() {
@@ -917,6 +918,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
           icon: const Icon(Icons.assignment_outlined),
           label: const Text('Session setup / starting rating'),
         ),
+      SessionTimerSetup(controller: _controller),
       if (_connected) ...[
         _deviceLine(),
         const SizedBox(height: 20),
@@ -987,6 +989,12 @@ class _CollectorScreenState extends State<CollectorScreen> {
                   ),
                   Text(_participantName()),
                   Text(_formatDuration(_sessionElapsed)),
+                  if (_controller.sessionCountdown.duration != null)
+                    Text(
+                      _controller.sessionCountdown.completed
+                          ? 'Timer complete · recording continues'
+                          : 'Timer ${_formatDuration(_controller.sessionCountdown.remaining)}',
+                    ),
                   if (_controller.preferences.showOxygen)
                     Text(
                       'SpO2 ${_controller.ringDataFresh ? _controller.latestRingReading?.spo2 ?? '--' : '--'}%',

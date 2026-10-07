@@ -8,6 +8,12 @@ import android.app.Service
 import android.content.Intent
 import android.os.PowerManager
 import android.os.IBinder
+import android.os.Handler
+import android.os.Looper
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.media.AudioManager
+import android.media.ToneGenerator
 import java.util.Locale
 
 class RecordingService : Service() {
@@ -16,6 +22,17 @@ class RecordingService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_TIMER_ALERT) {
+            // Do not restart or alter the ongoing recording for an alert.
+            if (recordingWakeLock == null) return START_NOT_STICKY
+            val tone = ToneGenerator(AudioManager.STREAM_MUSIC, 60)
+            tone.startTone(ToneGenerator.TONE_PROP_ACK, 700)
+            Handler(Looper.getMainLooper()).postDelayed({ tone.release() }, 1000)
+            if (intent.getBooleanExtra("vibrate", true)) {
+                getSystemService(Vibrator::class.java)?.vibrate(VibrationEffect.createOneShot(400, VibrationEffect.DEFAULT_AMPLITUDE))
+            }
+            return START_NOT_STICKY
+        }
         createChannel()
         // The existing 5-second notification updates renew a bounded CPU lock.
         // A stopped/crashed update loop cannot leave an indefinite lock held.
@@ -101,6 +118,7 @@ class RecordingService : Service() {
         const val RMSSD = "rmssd"
         const val ARTIFACT_COUNT = "artifactCount"
         const val ELAPSED_SECONDS = "elapsedSeconds"
+        const val ACTION_TIMER_ALERT = "desired_state.recording.TIMER_ALERT"
         const val ACTION_START = "desired_state.recording.START"
         const val ACTION_UPDATE = "desired_state.recording.UPDATE"
     }
