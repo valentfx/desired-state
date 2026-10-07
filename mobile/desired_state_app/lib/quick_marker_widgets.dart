@@ -273,8 +273,10 @@ class QuickMarkerBar extends StatefulWidget {
     super.key,
     required this.controller,
     this.compact = false,
+    this.closeAfterRecord = false,
   });
   final bool compact;
+  final bool closeAfterRecord;
   final SessionController controller;
   @override
   State<QuickMarkerBar> createState() => _QuickMarkerBarState();
@@ -291,18 +293,10 @@ class _QuickMarkerBarState extends State<QuickMarkerBar> {
     try {
       final marker = await widget.controller.markQuickMarker(item);
       if (!mounted || marker == null) return;
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            content: Text('Saved: ${marker.label}'),
-            action: SnackBarAction(
-              label: 'Add note',
-              onPressed: () =>
-                  showMarkerNote(context, widget.controller, marker),
-            ),
-          ),
-        );
+      ScaffoldMessenger.of(context).removeCurrentSnackBar();
+      if (widget.closeAfterRecord) {
+        Navigator.pop(context);
+      }
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -318,28 +312,34 @@ class _QuickMarkerBarState extends State<QuickMarkerBar> {
     final store = controller.quickMarkers;
     return ListenableBuilder(
       listenable: store,
-      builder: (context, _) => widget.compact && store.ready
+      builder: (context, _) => widget.compact
           ? Row(
               children: [
                 Expanded(
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        for (final item in store.items)
-                          Padding(
-                            padding: const EdgeInsets.only(right: 6),
-                            child: FilledButton.tonal(
-                              onPressed:
-                                  controller.sessionLogger != null &&
-                                      !controller.busy
-                                  ? () => _record(item)
-                                  : null,
-                              child: Text(item.label),
+                  child: FilledButton.icon(
+                    icon: const Icon(Icons.add_circle_outline),
+                    label: const Text('Add event'),
+                    onPressed:
+                        store.ready &&
+                            controller.sessionLogger != null &&
+                            !controller.busy
+                        ? () => Navigator.push(
+                            context,
+                            MaterialPageRoute<void>(
+                              builder: (_) => Scaffold(
+                                appBar: AppBar(title: const Text('Add event')),
+                                body: SafeArea(
+                                  child: SingleChildScrollView(
+                                    child: QuickMarkerBar(
+                                      controller: controller,
+                                      closeAfterRecord: true,
+                                    ),
+                                  ),
+                                ),
+                              ),
                             ),
-                          ),
-                      ],
-                    ),
+                          )
+                        : null,
                   ),
                 ),
                 IconButton(
@@ -350,11 +350,8 @@ class _QuickMarkerBarState extends State<QuickMarkerBar> {
                     MaterialPageRoute<void>(
                       builder: (_) => Scaffold(
                         appBar: AppBar(title: const Text('Markers & events')),
-                        body: ListenableBuilder(
-                          listenable: controller,
-                          builder: (context, _) => SingleChildScrollView(
-                            child: QuickMarkerBar(controller: controller),
-                          ),
+                        body: SingleChildScrollView(
+                          child: QuickMarkerBar(controller: controller),
                         ),
                       ),
                     ),
@@ -405,24 +402,20 @@ class _QuickMarkerBarState extends State<QuickMarkerBar> {
                 ] else if (store.items.isEmpty)
                   const Text('Add buttons with Manage quick markers.')
                 else
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        for (final item in store.items)
-                          Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: FilledButton.tonal(
-                              onPressed:
-                                  controller.sessionLogger != null &&
-                                      !controller.busy
-                                  ? () => _record(item)
-                                  : null,
-                              child: Text(item.label),
-                            ),
-                          ),
-                      ],
-                    ),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final item in store.items)
+                        FilledButton.tonal(
+                          onPressed:
+                              controller.sessionLogger != null &&
+                                  !controller.busy
+                              ? () => _record(item)
+                              : null,
+                          child: Text(item.label),
+                        ),
+                    ],
                   ),
               ],
             ),

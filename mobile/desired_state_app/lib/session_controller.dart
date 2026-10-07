@@ -1175,8 +1175,8 @@ class SessionController extends ChangeNotifier {
     _changed();
   }
 
-  Future<void> markEvent(String note) async {
-    await _recordMarker(note: note);
+  Future<void> markEvent(String note, {String? label}) async {
+    await _recordMarker(note: note, label: label);
   }
 
   Future<RecordedMarker?> markQuickMarker(QuickMarkerDefinition definition) =>
@@ -1185,6 +1185,7 @@ class SessionController extends ChangeNotifier {
   Future<RecordedMarker?> _recordMarker({
     QuickMarkerDefinition? definition,
     String note = '',
+    String? label,
   }) async {
     final logger = sessionLogger;
     if (logger == null || busy) {
@@ -1193,7 +1194,7 @@ class SessionController extends ChangeNotifier {
     final marker = RecordedMarker(
       id: newMarkerId(),
       sessionId: logger.sessionId,
-      label: definition?.label ?? 'Event',
+      label: definition?.label ?? label ?? 'Event',
       timestamp: DateTime.now(),
     );
     await logger.writeEvent(

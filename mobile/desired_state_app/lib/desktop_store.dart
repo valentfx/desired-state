@@ -12,6 +12,7 @@ const desktopStreams = [
   'measurements',
   'rr',
   'o2ring_measurements',
+  'events',
   'muse_bands',
   'h10_ecg',
   'h10_accelerometer',
@@ -228,7 +229,31 @@ class DesktopDecoder {
         rr.clear();
       }
     }
+    if (name == 'events' && row['event'] == 'posture_estimate') {
+      try {
+        final details = jsonDecode('${row['description']}') as Map;
+        const labels = [
+          'Unknown',
+          'On back',
+          'Right side',
+          'Left side',
+          'Upright',
+          'Prone',
+          'Uncalibrated',
+        ];
+        final value = labels.indexOf('${details['position']}');
+        add(
+          'Sleep position (recorded estimate)',
+          t,
+          value < 0 ? 0 : value,
+          double.infinity,
+        );
+      } catch (_) {
+        add('Sleep position (recorded estimate)', t, 0, double.infinity);
+      }
+    }
     if (name == 'o2ring_measurements') {
+      add('Ring movement (raw)', t, row['motion_raw'], 5);
       add(
         'SpO2 (%)',
         t,
@@ -282,7 +307,32 @@ class DesktopDecoder {
     }
     if (name == 'h10_accelerometer' && row['xyz_mg'] is List) {
       final xyz = row['xyz_mg'] as List;
-      for (var axis = 0; axis < 3; axis++) {
+      var movement = 0.0;
+      for (var i = 1; i < xyz.length; i++) {
+        final a = xyz[i - 1] as List, b = xyz[i] as List;
+        movement += math.sqrt(
+          List.generate(
+            3,
+            (axis) => math.pow(
+              (b[axis] as num).toDouble() - (a[axis] as num).toDouble(),
+              2,
+            ),
+          ).fold<double>(0, (sum, value) => sum + value),
+        );
+      }
+      if (xyz.length > 1) {
+        add(
+          'H10 movement (mean sample delta, mG)',
+          t,
+          movement / (xyz.length - 1),
+          2,
+        );
+      }
+      for (
+        var axis = 0;
+        axis < (row['_desktop_summary_only'] == true ? 0 : 3);
+        axis++
+      ) {
         samples(
           'H10 ${['X', 'Y', 'Z'][axis]} (mG)',
           xyz.map((v) => (v as List)[axis]).toList(),
@@ -334,7 +384,10 @@ Future<DesktopIndex> indexDesktopSession(String path, DateTime origin) =>
             }
             index.duration = math.max(index.duration, t);
             count++;
-            if (!rawStreams.contains(name)) {
+            if (!rawStreams.contains(name) || name == 'h10_accelerometer') {
+              if (name == 'h10_accelerometer') {
+                row['_desktop_summary_only'] = true;
+              }
               decoder.decode(name, row, t, index.overview, 0, double.infinity);
             }
           } catch (_) {
@@ -351,6 +404,22 @@ Future<DesktopIndex> indexDesktopSession(String path, DateTime origin) =>
           );
         }
       }
+      final eventsFile = File('$path/events.jsonl');
+      if (await eventsFile.exists()) {
+        final events = <Map<String, dynamic>>[];
+        await for (final line in desktopLines(eventsFile)) {
+          try {
+            events.add(jsonDecode(line.$2) as Map<String, dynamic>);
+          } catch (_) {
+            /* Index warnings report malformed rows. */
+          }
+        }
+        index.overview['Sleep position (recorded estimate)'] =
+            recordedPosturePoints(events, origin, 0, index.duration);
+        if (index.overview['Sleep position (recorded estimate)']!.isEmpty) {
+          index.overview.remove('Sleep position (recorded estimate)');
+        }
+      }
       return index;
     });
 
@@ -364,7 +433,7 @@ Future<(Map<String, List<SignalPoint>>, List<String>)> readDesktopWindow(
   final warnings = <String>[];
   final decoder = DesktopDecoder();
   for (final name in index.offsets.keys) {
-    if (rawStreams.contains(name) && !raw) {
+    if (rawStreams.contains(name) && name != 'h10_accelerometer' && !raw) {
       continue;
     }
     var offset = 0;
@@ -395,6 +464,9 @@ Future<(Map<String, List<SignalPoint>>, List<String>)> readDesktopWindow(
         if (t > end + 3 && !index.unordered.contains(name)) {
           break;
         }
+        if (name == 'h10_accelerometer' && !raw) {
+          row['_desktop_summary_only'] = true;
+        }
         decoder.decode(name, row, t, data, start, end);
       } catch (_) {
         invalid++;
@@ -404,8 +476,83 @@ Future<(Map<String, List<SignalPoint>>, List<String>)> readDesktopWindow(
       warnings.add('$name: $invalid unreadable rows in selected range');
     }
   }
+  final eventsFile = File('${index.path}/events.jsonl');
+  if (await eventsFile.exists()) {
+    final events = <Map<String, dynamic>>[];
+    await for (final line in desktopLines(eventsFile)) {
+      try {
+        events.add(jsonDecode(line.$2) as Map<String, dynamic>);
+      } catch (_) {
+        /* Reported by the stream reader above. */
+      }
+    }
+    final positions = recordedPosturePoints(events, index.origin, start, end);
+    if (positions.isNotEmpty) {
+      data['Sleep position (recorded estimate)'] = positions;
+    }
+  }
   return (data, warnings);
 });
 
 Future<HistoryEntry> readDesktopEntry(String path) =>
     SessionHistoryRepository().readEntry(Directory(path));
+
+/// Carry a recorded categorical estimate only until a recorded discontinuity.
+/// Zero is explicit unknown; no calibration or sleep staging is inferred.
+List<SignalPoint> recordedPosturePoints(
+  List<Map<String, dynamic>> events,
+  DateTime origin,
+  double start,
+  double end,
+) {
+  const labels = [
+    'Unknown',
+    'On back',
+    'Right side',
+    'Left side',
+    'Upright',
+    'Prone',
+    'Uncalibrated',
+  ];
+  final changes = <SignalPoint>[];
+  var hasPosture = false;
+  for (final event in events) {
+    final timestamp = DateTime.tryParse('${event['received_utc']}');
+    if (timestamp == null) continue;
+    final time = timestamp.difference(origin).inMicroseconds / 1000000;
+    if (event['event'] == 'posture_estimate') {
+      hasPosture = true;
+      var code = 0;
+      try {
+        final details = jsonDecode('${event['description']}') as Map;
+        code = labels.indexOf('${details['position']}');
+      } catch (_) {
+        /* Malformed estimates remain unknown. */
+      }
+      changes.add((time, (code < 0 ? 0 : code).toDouble()));
+    } else if ([
+      'session_paused',
+      'bluetooth_disconnected',
+      'bluetooth_manual_disconnect',
+      'accelerometer_clock_gap_or_reset',
+      'posture_calibration_selected',
+    ].contains(event['event'])) {
+      changes.add((time, 0));
+    }
+  }
+  if (!hasPosture) return [];
+  changes.sort((a, b) => a.$1.compareTo(b.$1));
+  var current = 0.0;
+  for (final point in changes) {
+    if (point.$1 <= start) current = point.$2;
+  }
+  final result = <SignalPoint>[(start, current)];
+  for (final point in changes) {
+    if (point.$1 <= start || point.$1 > end) continue;
+    result.add((point.$1, current));
+    result.add(point);
+    current = point.$2;
+  }
+  result.add((end, current));
+  return result;
+}
