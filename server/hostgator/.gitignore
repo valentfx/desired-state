@@ -1,0 +1,9 @@
+# Runtime files belong outside public_html and never in version control.
+backend.php
+upload-token.txt
+*.dpapi
+*.sql.gz
+config/
+storage/
+uploads/
+backups/

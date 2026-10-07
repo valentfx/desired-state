@@ -268,3 +268,27 @@ Validation: matching Dart 3.13.4 formatting/parsing and standalone journal check
 Start remains immediate without setup. Add activity buttons through Quick markers: yoga, resistance training, breathwork, sound bowls, meditation, stretching, running, steam room, sauna, swimming, pickleball, walking, cycling, haptics, audio and rest. Existing user lists are not replaced. Custom labels, add/remove/rename and persistence remain supported. Most-used favorites sort first; equal usage counts retain the saved ordering. The compact Live row scrolls horizontally to reach all favorites. Usage increments only after a successful marker write. Old definitions read with zero usage and no activity ID. Past event labels/IDs remain immutable.
 
 Catalog activity markers add activity_id, activity_schema_version 1 and activity_action mark to existing marked_event rows. These are instant observations, not inferred start/stop intervals. Custom markers retain stable marker_definition_id and label snapshots without inventing an activity category. Backend event ingestion must preserve these fields. Explicit duration/start/stop controls remain pending.
+
+## Marker manager layout repair 2026-10-05
+
+User PC: Flutter analysis passed, 133 tests passed and the existing marker-manager widget test failed because the expanded activity catalog displaced saved markers. Moved the catalog below favorites into an initially collapsed expansion. Existing regression test is retained; full rerun/build remain pending. Repair package verifies source hashes and resumes the applied update without another cherry-pick.
+
+## 2026-10-05 — HostGator deployment and Windows upload foundation
+
+User confirmed HostGator installation in the existing valentfx_desiredstate MySQL 5.7 database: PHP lint, schema version 1, HTTPS health and the synthetic integration test passed. The test covered authentication, unknown upload, resumable chunks, stale offsets, corrupted chunk rejection, final SHA256 and immutable verified files. Source is versioned under server/hostgator; generated private backend.php, upload-token.txt and stored logs remain outside Git and public_html.
+
+Windows Analyze now exposes Upload selected session for a completed recording. A separate screen prepares an immutable temporary snapshot, hashes every top-level JSON/JSONL file in a worker isolate, sends bounded 2 MiB chunks, resumes from server offsets after uncertain acknowledgments, and checks final verified status/hash/size per file. Matching revisions do not transfer twice. Local originals remain intact and a credential-free receipt is saved in desired_state_desktop/upload-receipts. This verifies individual files, not an atomic complete-session revision.
+
+Run tools/configure_backend_upload.ps1 once on the work PC. It transfers the existing private token through SSH into a user-restricted temporary directory, protects it with Windows DPAPI CurrentUser in LOCALAPPDATA/DesiredState/backend-token.dpapi, and removes the temporary plaintext. The app decrypts it in a captured process without displaying/logging it. Credentials do not sit in OneDrive recordings or the repository. HTTPS destination is fixed to the deployed valentfx.com endpoint and redirects are not followed.
+
+Standalone matching-Dart uploader analysis and eight tests passed using cached crypto 3.0.7 in an isolated harness. The app keeps its existing crypto 3.0.6 dependency; full Flutter analysis/tests and Windows build with that exact dependency remain PC installer gates. Windows credential handling and one real completed-session transfer are not yet verified. Automatic uploads, profile reconciliation, event indexing, account onboarding, large-file host timing and off-host backup/restore remain pending. Participant-default and Stop UI changes previously discussed are deferred and are not included.
+
+## Home Windows upload validation 2026-10-05
+Flutter analysis passed, all 142 tests passed, and the Windows release build succeeded. Android APK build remains blocked because the configured desired-state-home-debug.keystore is missing on this PC. No Android installation performed. Windows credential setup and a real-session upload remain pending.
+
+## Windows upload status update
+2026-10-05: Windows session upload status from verification receipts; hash checks run off the UI isolate and detect added/missing/changed files. Pause/failure state persists; repeat-upload results separate already-stored files and newly confirmed bytes. Existing raw logs/credentials/backend are unchanged. Local diff checks passed; Flutter checks/build are installer gates. Source commit c2079aa. User confirmed prior home analysis/142 tests/Windows build and real upload; this follow-up still needs PC validation. Compression remains pending.
+
+
+## Lossless compression update
+Windows upload status and lossless gzip upload update: original hashes/lengths retained, compressed transfer/storage independently checked, old raw uploads reused, paused immutable snapshots retained while upload screen is open. Shared Dart encoder is cross-platform; current UI credentials remain Windows-only. Local phone storage readers and direct mobile upload remain next steps. Source commits c2079aa and ab4b324. This workspace passed Bash syntax, payload/ZIP integrity and Git diff checks; Flutter/PHP/MySQL runtime checks are installer gates, not claimed complete. Originals, existing server objects and credentials are retained.

@@ -158,3 +158,16 @@ Next verification: short combined recording; posture reference checks; screen-of
 ## State feedback and central storage follow-up 2026-10-05
 
 First implementation: session context and optional pre/live/post rating journal, exports, phone follow-ups and desktop viewer. Complete acceptance checks before device rollout. Next: persist named presets, add User/Research experiences and concurrent activity events, then baseline/outcome summaries and timeline ratings. Implement authentication, private file catalog, resumable verified uploads and permissions against [state-feedback-and-upload-contract.md](state-feedback-and-upload-contract.md). Add legacy HRV Logger import without altering original exports. Improve phone sync progress with session/file/byte reporting.
+
+## 2026-10-05 — central upload acceptance sequence
+
+Server deployed and synthetic upload test passed; backend source is under server/hostgator. Manual Windows upload path is prepared. Acceptance gates: install/build on work PC, protect the private token, select one completed small recording, inspect the per-file receipt, retry without duplicate transfer, then test interrupted transfer and a large EEG file. All originals remain local. Existing 10 GiB application reservation limit is not a hosting quota.
+
+After those gates: persistent automatic queue for completed sessions with backoff and clear progress, atomic session revisions and remotely queryable inventory, stable profile/correction ingestion and versioned event indexing, per-account authorization tests/onboarding/revocation, consent/retention/export/deletion controls, off-host backups with restore validation, and object storage migration when needed. Do not bulk-upload all recordings or claim automatic upload based on this manual first stage.
+
+## Windows upload status update
+2026-10-05: Windows session upload status from verification receipts; hash checks run off the UI isolate and detect added/missing/changed files. Pause/failure state persists; repeat-upload results separate already-stored files and newly confirmed bytes. Existing raw logs/credentials/backend are unchanged. Local diff checks passed; Flutter checks/build are installer gates. Source commit c2079aa. User confirmed prior home analysis/142 tests/Windows build and real upload; this follow-up still needs PC validation. Compression remains pending.
+
+
+## Lossless compression update
+Windows upload status and lossless gzip upload update: original hashes/lengths retained, compressed transfer/storage independently checked, old raw uploads reused, paused immutable snapshots retained while upload screen is open. Shared Dart encoder is cross-platform; current UI credentials remain Windows-only. Local phone storage readers and direct mobile upload remain next steps. Source commits c2079aa and ab4b324. This workspace passed Bash syntax, payload/ZIP integrity and Git diff checks; Flutter/PHP/MySQL runtime checks are installer gates, not claimed complete. Originals, existing server objects and credentials are retained.

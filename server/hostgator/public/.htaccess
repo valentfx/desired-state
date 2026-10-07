@@ -1,0 +1,3 @@
+Options -Indexes
+DirectoryIndex index.php
+SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1

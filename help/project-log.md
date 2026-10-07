@@ -340,3 +340,33 @@ First PC validation passed Flutter analysis and 133 tests; marker manager regres
 
 ## State feedback PC software validation 20261005-162740
 Installer completed dependency resolution, Dart formatting, Flutter analysis, full tests, Windows release build and Android debug APK build. Validation transcript: F:\1dev\desired-state-feedback-validation-20261005-162740\validation.log. Phone behavior and Windows interaction still require hardware checks. No backend has been deployed.
+## Marker manager layout repair 2026-10-05
+
+User PC: Flutter analysis passed, 133 tests passed and the existing marker-manager widget test failed because the expanded activity catalog displaced saved markers. Moved the catalog below favorites into an initially collapsed expansion. Existing regression test is retained; full rerun/build remain pending. Repair package verifies source hashes and resumes the applied update without another cherry-pick.
+
+## 2026-10-05 — versioned HostGator backend and manual Windows uploads
+
+Added deployed backend source under server/hostgator, including additive MySQL schema, PHP API, SSH installer, private configuration generator and synthetic upload test. Deployment was performed by the user: checksum/PHP syntax checks, schema setup, HTTPS health and smoke test all passed. Test session backend_smoke_2668331a28606104 is synthetic and must be excluded from modeling. Generated secrets and raw data are excluded from version control.
+
+Windows Analyze gains a separate upload screen for one completed session. Snapshotting/hashing runs outside the UI isolate and bounds transfer memory. Server offsets govern retries; every file must finish with matching hash and verified byte count before a local receipt is written. DPAPI credentials are scoped to the current Windows login and obtained by a one-time SSH helper. Originals are retained. Stop/profile defaults are deliberately not part of this backend change.
+
+Validation: standalone Dart 3.13.4 analysis and eight uploader tests passed (snapshot preservation, lost-ack resume, duplicate suppression, zero-byte/Unicode data, source edits, incomplete/corrupt sessions, link rejection, incorrect offsets/hashes, pause/retry and credential-redacted errors). Harness uses cached crypto 3.0.7 while the app retains crypto 3.0.6. Dart formatting/parsing and Bash installer syntax pass. PHP/MySQL execution was verified by the user on HostGator, not repeated in this workspace. PowerShell/DPAPI, full Flutter suite and Windows release build must pass on the PC; real-session upload and large-file verification remain unrun. No remote push or automatic upload was performed here.
+
+## Home Windows upload validation 2026-10-05
+Flutter analysis passed, all 142 tests passed, and the Windows release build succeeded. Android APK build remains blocked because the configured desired-state-home-debug.keystore is missing on this PC. No Android installation performed. Windows credential setup and a real-session upload remain pending.
+
+## Windows upload status update
+2026-10-05: Windows session upload status from verification receipts; hash checks run off the UI isolate and detect added/missing/changed files. Pause/failure state persists; repeat-upload results separate already-stored files and newly confirmed bytes. Existing raw logs/credentials/backend are unchanged. Local diff checks passed; Flutter checks/build are installer gates. Source commit c2079aa. User confirmed prior home analysis/142 tests/Windows build and real upload; this follow-up still needs PC validation. Compression remains pending.
+
+
+Windows upload status validation: formatting, analysis, full tests and clean Windows release build passed on this PC. No Android build, automatic commit or push performed.
+
+## Lossless compression update
+Windows upload status and lossless gzip upload update: original hashes/lengths retained, compressed transfer/storage independently checked, old raw uploads reused, paused immutable snapshots retained while upload screen is open. Shared Dart encoder is cross-platform; current UI credentials remain Windows-only. Local phone storage readers and direct mobile upload remain next steps. Source commits c2079aa and ab4b324. This workspace passed Bash syntax, payload/ZIP integrity and Git diff checks; Flutter/PHP/MySQL runtime checks are installer gates, not claimed complete. Originals, existing server objects and credentials are retained.
+
+
+## Work PC integration 20261007-105059
+Merged remote cloud upload, persistent upload status and lossless compression with local session state feedback and activity markers. Retained both sides of documentation conflicts and both desktop toolbar actions. Flutter analysis, full tests and Windows release build passed. Conflict backups: F:\1dev\desired-state-merge-backup-20261007-105059. No backend redeployment or Android installation performed.
+
+## Work PC desktop integration 20261007-105736
+Integrated remote cloud uploads, upload status and lossless compression with local state feedback and activity markers. Merge conflicts resolved. Flutter analysis, full tests and Windows release build passed on the work PC. Backend deployment and Android installation were not part of this validation.

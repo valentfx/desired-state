@@ -9,6 +9,8 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'desktop_store.dart';
+import 'backend_upload_screen.dart';
+import 'upload_status.dart';
 import 'desktop_sync.dart';
 import 'desktop_inspection.dart';
 import 'session_history.dart';
@@ -39,6 +41,40 @@ class _DesktopScreenState extends State<DesktopScreen> {
   String? _inspectionError;
   Map<String, List<SignalPoint>> _inspectionData = {};
   final Map<String, String> _sessionDetails = {};
+  final Map<String, String> _uploadStatuses = {};
+  int _uploadStatusGeneration = 0;
+
+  Future<void> _loadUploadStatuses(List<HistoryEntry> entries) async {
+    final generation = ++_uploadStatusGeneration;
+    for (final entry in entries) {
+      if (!mounted || generation != _uploadStatusGeneration) {
+        return;
+      }
+      setState(() => _uploadStatuses[entry.id] = 'checking');
+      final status = await readUploadStatus(entry.directory.path, entry.id);
+      if (!mounted || generation != _uploadStatusGeneration) {
+        return;
+      }
+      setState(() => _uploadStatuses[entry.id] = status);
+    }
+  }
+
+  Future<void> _uploadSelected() async {
+    final entry = _entry!;
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => BackendUploadScreen(
+          directory: entry.directory,
+          sessionId: entry.id,
+        ),
+      ),
+    );
+    if (mounted) {
+      unawaited(_loadUploadStatuses(_sessions));
+    }
+  }
+
   @override
   void dispose() {
     _inspectionTimer?.cancel();
@@ -264,6 +300,7 @@ class _DesktopScreenState extends State<DesktopScreen> {
     if (mounted) {
       setState(() => _sessions = entries);
       unawaited(_loadDetails(entries));
+      unawaited(_loadUploadStatuses(entries));
     }
   }
 
@@ -603,9 +640,18 @@ class _DesktopScreenState extends State<DesktopScreen> {
                     child: ListTile(
                       selected: entry.directory.path == _entry?.directory.path,
                       title: Text(entry.participant),
-                      subtitle: Text(
-                        '${entry.started?.toLocal().toString().split('.').first ?? entry.id}\n${entry.ended ? 'Complete' : 'Incomplete snapshot'} · ${_listDuration(entry)}\n${entry.metadata.description}',
-                        maxLines: 4,
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '${entry.started?.toLocal().toString().split('.').first ?? entry.id}\n${entry.ended ? 'Complete' : 'Incomplete snapshot'} · ${_listDuration(entry)}\n${entry.metadata.description}',
+                            maxLines: 4,
+                          ),
+                          Text(
+                            uploadStatusLabels[_uploadStatuses[entry.id] ??
+                                'checking']!,
+                          ),
+                        ],
                       ),
                       trailing: entry.readable
                           ? null
@@ -864,6 +910,13 @@ class _DesktopScreenState extends State<DesktopScreen> {
     appBar: AppBar(
       title: const Text('Desired State · Analyze'),
       actions: [
+        IconButton(
+          tooltip: 'Upload selected session',
+          icon: const Icon(Icons.cloud_upload_outlined),
+          onPressed: _busy || _entry == null || !_entry!.ended
+              ? null
+              : _uploadSelected,
+        ),
         IconButton(
           tooltip: 'State feedback',
           icon: const Icon(Icons.sentiment_satisfied_alt),
