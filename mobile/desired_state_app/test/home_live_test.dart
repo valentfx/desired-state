@@ -116,7 +116,7 @@ void main() {
       );
       expect(find.text('Analyze'), findsOneWidget);
       expect(controller.sessionLogger, isNull);
-      await openScreen(tester, 'Live');
+      await openScreen(tester, 'Session');
       await tester.pumpAndSettle();
       await tester.enterText(
         find.widgetWithText(TextField, 'Participant name'),
@@ -146,9 +146,9 @@ void main() {
       expect(find.byType(BottomSheet), findsNothing);
       await settleIo(
         tester,
-        () => find.byTooltip('Live settings').evaluate().isNotEmpty,
+        () => find.byTooltip('Session settings').evaluate().isNotEmpty,
       );
-      expect(find.byTooltip('Live settings'), findsOneWidget);
+      expect(find.byTooltip('Session settings'), findsOneWidget);
       await tester.runAsync(() => tester.tap(find.byTooltip('Session notes')));
       await settleIo(
         tester,
@@ -196,7 +196,9 @@ void main() {
         tester,
         () => find.textContaining('Edited intention').evaluate().isNotEmpty,
       );
-      await tester.tap(find.textContaining('Edited intention'));
+      await tester.ensureVisible(find.textContaining('Edited intention'));
+      await tester.pump();
+      await tester.tap(find.textContaining('Edited intention').hitTestable());
       await settleIo(
         tester,
         () => find.text('Edit notes & tags').evaluate().isNotEmpty,
@@ -204,7 +206,7 @@ void main() {
       await tester.tap(
         find.descendant(
           of: find.byType(RecordingHistoryBanner),
-          matching: find.text('Live'),
+          matching: find.text('Session'),
         ),
       );
       await tester.pumpAndSettle();
@@ -262,9 +264,9 @@ void main() {
         tester,
         () => find.textContaining('2 sessions').evaluate().isNotEmpty,
       );
-      await tester.tap(find.text('Filter by participant, ID, date'));
+      await tester.tap(find.text('Filter by participant, type and date'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byType(DropdownButton<String>));
+      await tester.tap(find.byType(DropdownButton<String>).last);
       await tester.pumpAndSettle();
       await tester.tap(
         find.text('Legacy / unassigned ID: Fixture person').last,

@@ -25,7 +25,7 @@ class StateRatingBar extends StatelessWidget {
         spacing: 4,
         runSpacing: 4,
         children: [
-          for (var n = 0; n <= 10; n++)
+          for (var n = question.minimum; n <= 10; n++)
             ChoiceChip(
               label: Text('$n'),
               selected: value == n,
@@ -33,7 +33,7 @@ class StateRatingBar extends StatelessWidget {
             ),
         ],
       ),
-      Text('0 = ${question.low} · 10 = ${question.high}'),
+      Text('${question.minimum} = ${question.low} · 10 = ${question.high}'),
       if (value == null) const Text('Optional — no answer selected.'),
     ],
   );
@@ -48,15 +48,17 @@ class SessionSetupResult {
 
 Future<SessionSetupResult?> showSessionSetup(
   BuildContext context,
-  SessionContext initial,
-) => showModalBottomSheet<SessionSetupResult>(
+  SessionContext initial, {
+  bool ratingOnly = false,
+}) => showModalBottomSheet<SessionSetupResult>(
   context: context,
   isScrollControlled: true,
-  builder: (_) => _SessionSetup(initial: initial),
+  builder: (_) => _SessionSetup(initial: initial, ratingOnly: ratingOnly),
 );
 
 class _SessionSetup extends StatefulWidget {
-  const _SessionSetup({required this.initial});
+  const _SessionSetup({required this.initial, this.ratingOnly = false});
+  final bool ratingOnly;
   final SessionContext initial;
   @override
   State<_SessionSetup> createState() => _SessionSetupState();
@@ -89,70 +91,79 @@ class _SessionSetupState extends State<_SessionSetup> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              'Session setup',
+              widget.ratingOnly ? 'How do I feel?' : 'Session setup',
               style: Theme.of(context).textTheme.titleLarge,
             ),
-            DropdownButtonFormField<String>(
-              initialValue: purpose,
-              decoration: const InputDecoration(labelText: 'Purpose'),
-              items: [
-                for (final p in [
-                  'personal_tracking',
-                  'experiment',
-                  'device_test',
-                ])
-                  DropdownMenuItem(
-                    value: p,
-                    child: Text(p.replaceAll('_', ' ')),
-                  ),
-              ],
-              onChanged: (v) => setState(() => purpose = v!),
-            ),
-            DropdownButtonFormField<String>(
-              initialValue: type,
-              decoration: const InputDecoration(labelText: 'Session type'),
-              items: [
-                for (final t in [
-                  'monitoring',
-                  'sleep',
-                  'relaxation',
-                  'exercise',
-                  'sensor_comparison',
-                  'other',
-                ])
-                  DropdownMenuItem(
-                    value: t,
-                    child: Text(t.replaceAll('_', ' ')),
-                  ),
-              ],
-              onChanged: (v) => setState(() => type = v!),
-            ),
-            Wrap(
-              spacing: 6,
-              children: [
-                for (final label in ['calm', 'focused', 'energized', 'restful'])
-                  ChoiceChip(
-                    label: Text(label),
-                    selected: goal.text == label,
-                    onSelected: (_) => setState(() {
-                      goal.text = label;
-                      value = null;
-                      ratedAt = null;
-                    }),
-                  ),
-              ],
-            ),
-            TextField(
-              controller: goal,
-              decoration: const InputDecoration(
-                labelText: 'Desired state',
-                hintText: 'For example calm, focused, restful',
+            if (!widget.ratingOnly) ...[
+              DropdownButtonFormField<String>(
+                initialValue: purpose,
+                decoration: const InputDecoration(labelText: 'Purpose'),
+                items: [
+                  for (final p in [
+                    'personal_tracking',
+                    'experiment',
+                    'device_test',
+                  ])
+                    DropdownMenuItem(
+                      value: p,
+                      child: Text(p.replaceAll('_', ' ')),
+                    ),
+                ],
+                onChanged: (v) => setState(() => purpose = v!),
               ),
-              onChanged: (_) => setState(() {
-                value = null;
-                ratedAt = null;
-              }),
-            ),
+              DropdownButtonFormField<String>(
+                initialValue: type,
+                decoration: const InputDecoration(labelText: 'Session type'),
+                items: [
+                  for (final t in [
+                    'monitoring',
+                    'sleep',
+                    'relaxation',
+                    'exercise',
+                    'sensor_comparison',
+                    'other',
+                  ])
+                    DropdownMenuItem(
+                      value: t,
+                      child: Text(t.replaceAll('_', ' ')),
+                    ),
+                ],
+                onChanged: (v) => setState(() => type = v!),
+              ),
+            ],
+            if (!widget.ratingOnly || question == FeedbackQuestion.goal) ...[
+              Wrap(
+                spacing: 6,
+                children: [
+                  for (final label in [
+                    'calm',
+                    'focused',
+                    'energized',
+                    'restful',
+                  ])
+                    ChoiceChip(
+                      label: Text(label),
+                      selected: goal.text == label,
+                      onSelected: (_) => setState(() {
+                        goal.text = label;
+                        value = null;
+                        ratedAt = null;
+                      }),
+                    ),
+                ],
+              ),
+              TextField(
+                controller: goal,
+                decoration: const InputDecoration(
+                  labelText: 'Desired state',
+                  hintText: 'For example calm, focused, restful',
+                ),
+                onChanged: (_) => setState(() {
+                  value = null;
+                  ratedAt = null;
+                }),
+              ),
+            ],
             DropdownButtonFormField<FeedbackQuestion>(
               initialValue: question,
               decoration: const InputDecoration(labelText: 'Rating question'),
@@ -186,20 +197,24 @@ class _SessionSetupState extends State<_SessionSetup> {
               ),
             const SizedBox(height: 12),
             FilledButton(
-              onPressed: () => Navigator.pop(
-                context,
-                SessionSetupResult(
-                  SessionContext(
-                    purpose: purpose,
-                    type: type,
-                    desiredState: goal.text,
-                    question: question,
-                  ),
-                  value,
-                  ratedAt,
-                ),
+              onPressed: widget.ratingOnly && value == null
+                  ? null
+                  : () => Navigator.pop(
+                      context,
+                      SessionSetupResult(
+                        SessionContext(
+                          purpose: purpose,
+                          type: type,
+                          desiredState: goal.text,
+                          question: question,
+                        ),
+                        value,
+                        ratedAt,
+                      ),
+                    ),
+              child: Text(
+                widget.ratingOnly ? 'Save rating' : 'Use for next session',
               ),
-              child: const Text('Use for next session'),
             ),
           ],
         ),
@@ -264,28 +279,42 @@ class _SessionFeedbackScreenState extends State<SessionFeedbackScreen> {
       ) as Map<String, dynamic>;
       final config = manifest['session_context'] as Map?;
       final id = (config?['rating_question'] as Map?)?['id'];
-      final question = FeedbackQuestion.values
+      var question = FeedbackQuestion.values
           .where((q) => q.id == id)
           .firstOrNull;
-      if (question == null) {
-        throw StateError(
-          'This legacy session has no defined rating question. Setup applies to new recordings.',
+      if (!mounted) return;
+      var desiredState = config?['desired_state'] as String?;
+      int? value;
+      if (question == null ||
+          (question == FeedbackQuestion.goal &&
+              (desiredState ?? '').trim().isEmpty)) {
+        final selection = await showSessionSetup(
+          context,
+          const SessionContext(question: FeedbackQuestion.energy),
+          ratingOnly: true,
         );
+        if (selection == null || !mounted) return;
+        question = selection.context.question;
+        desiredState = selection.context.desiredState;
+        if (question == FeedbackQuestion.goal && desiredState.trim().isEmpty) {
+          return;
+        }
+        value = selection.value;
       }
-      if (!mounted) {
-        return;
-      }
-      final value = await showStateRating(context, question);
+      if (!mounted) return;
+      final effectiveQuestion = question;
+      value ??= await showStateRating(context, effectiveQuestion);
+
       if (value == null) {
         return;
       }
       await store.add(
-        question: question,
+        question: effectiveQuestion,
         value: value,
         phase: 'followup',
         source: 'session_review',
         participantId: manifest['participant_id'] as String?,
-        desiredState: config?['desired_state'] as String?,
+        desiredState: desiredState,
       );
       if (mounted) {
         setState(() => rows = store.read());

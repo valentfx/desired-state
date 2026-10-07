@@ -187,7 +187,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(home: SessionHome(controller: controller)),
       );
-      await openScreen(tester, 'Live');
+      await openScreen(tester, 'Session');
       await settleIo(
         tester,
         () => find.byType(RelativeOverlayPlot).evaluate().isNotEmpty,

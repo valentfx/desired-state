@@ -58,6 +58,17 @@ void main() {
     copyPhoneFile: copy,
     sourceDevice: 'fake-device',
   );
+  test('phone recording definitions mirror to Windows and invalid updates preserve the prior catalog', () async {
+    phone['recording_types.jsonl'] =
+        '${jsonEncode({'id': 'custom_yoga', 'name': 'Yoga', 'definition': 'Yoga practice', 'version': 1, 'archived': false})}\n';
+    await sync();
+    final target = File('${temporary.path}/recording_types.jsonl');
+    final original = await target.readAsString();
+    expect(original, contains('Yoga'));
+    phone['recording_types.jsonl'] = '{broken\n';
+    await expectLater(sync(), throwsFormatException);
+    expect(await target.readAsString(), original);
+  });
   test('stable unfinished overnight session imports; repeat avoids copying; completion retains revision', () async {
     final first = await sync();
     expect(first.single, contains('incomplete_snapshot'));
@@ -115,5 +126,21 @@ void main() {
       ),
       false,
     );
+  });
+  test('desktop annotation and local deletion survive later phone sync', () async {
+    await sync();
+    final journal = File(
+      '${temporary.path}/desired_state_sessions/overnight/history_edits.jsonl',
+    );
+    await journal.writeAsString('{"desktop_note":"retain"}\n');
+    phone['rr.jsonl'] = '${phone['rr.jsonl']}{"rr_ms":900}\n';
+    final count = copies;
+    expect((await sync()).single, contains('desktop annotations retained'));
+    expect(copies, count);
+    expect(await journal.readAsString(), contains('retain'));
+    await File('${temporary.path}/deleted_sessions.json')
+        .writeAsString('{"overnight":{}}');
+    expect((await sync()).single, contains('locally deleted'));
+    expect(copies, count);
   });
 }

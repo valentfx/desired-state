@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'rr_history.dart';
 import 'session_archive.dart';
 import 'processing.dart';
+import 'participant_store.dart';
 
 typedef JsonRow = Map<String, dynamic>;
 
@@ -55,16 +56,18 @@ class HistoryMetadata {
     required this.notes,
     required this.tags,
     Map<String, String>? eventNotes,
+    Map<String, String>? eventLabels,
     this.participantName,
     this.participantId,
     this.userInfo = '',
-  }) : eventNotes = eventNotes ?? {};
+  }) : eventNotes = eventNotes ?? {},
+       eventLabels = eventLabels ?? {};
   final String? participantName, participantId;
   final String userInfo;
   final String description;
   final String notes;
   final List<String> tags;
-  final Map<String, String> eventNotes;
+  final Map<String, String> eventNotes, eventLabels;
   JsonRow toJson() => {
     'participant_name': ?participantName,
     'participant_id': ?participantId,
@@ -73,6 +76,7 @@ class HistoryMetadata {
     'notes': notes,
     'outcome_tags': tags,
     'event_notes': eventNotes,
+    'event_labels': eventLabels,
   };
   factory HistoryMetadata.fromJson(JsonRow row) {
     if (row['description'] is! String ||
@@ -89,6 +93,7 @@ class HistoryMetadata {
       notes: row['notes'] as String,
       tags: List<String>.from(row['outcome_tags'] as List),
       eventNotes: Map<String, String>.from(row['event_notes'] as Map),
+      eventLabels: Map<String, String>.from(row['event_labels'] as Map? ?? {}),
     );
   }
 }
@@ -351,6 +356,33 @@ class SessionHistoryRepository {
           ].whereType<String>().where((s) => s.isNotEmpty).join('\n');
         }
       }
+    }
+    final profileStore = ParticipantStore(
+      directoryProvider: () async => dir.parent.parent,
+    );
+    try {
+      final capturedId =
+          metadata.participantId ?? manifest['participant_id'] as String?;
+      if (capturedId != null) {
+        final canonical = await profileStore.canonicalId(capturedId);
+        final profile = (await profileStore.profiles())[canonical];
+        if (profile != null) {
+          metadata = HistoryMetadata(
+            description: metadata.description,
+            notes: metadata.notes,
+            tags: metadata.tags,
+            eventNotes: metadata.eventNotes,
+            eventLabels: metadata.eventLabels,
+            participantName: profile.name,
+            participantId: canonical,
+            userInfo: profile.info,
+          );
+        }
+      }
+    } catch (error) {
+      warnings.add(
+        'Participant directory unreadable; capture identity retained: $error',
+      );
     }
     warnings.addAll(editWarnings);
     for (final name in ['measurements', 'rr']) {
@@ -635,6 +667,32 @@ class SessionHistoryRepository {
       throw StateError('Linked annotation files are not supported');
     }
   }
+
+  Future<String> deleteSession(HistoryEntry entry) => _serial(() async {
+    final latest = await readEntry(entry.directory);
+    await _checkWritable(latest);
+    final root = await _root();
+    final trash = Directory('${root.parent.path}/desired_state_trash');
+    await trash.create(recursive: true);
+    final destination =
+        '${trash.path}/${entry.id}-${DateTime.now().microsecondsSinceEpoch}';
+    final deletedFile = File('${root.parent.path}/deleted_sessions.json');
+    final deleted = await deletedFile.exists()
+        ? jsonDecode(await deletedFile.readAsString()) as Map<String, dynamic>
+        : <String, dynamic>{};
+    final original = await entry.directory.rename(destination);
+    try {
+      deleted[entry.id] = {
+        'deleted_utc': DateTime.now().toUtc().toIso8601String(),
+        'trash_path': destination,
+      };
+      await deletedFile.writeAsString(jsonEncode(deleted), flush: true);
+    } catch (_) {
+      await original.rename(entry.directory.path);
+      rethrow;
+    }
+    return destination;
+  });
 
   Future<HistoryEntry> saveMetadata(
     HistoryEntry entry,

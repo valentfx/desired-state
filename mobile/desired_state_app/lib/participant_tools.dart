@@ -1,11 +1,8 @@
-import 'dart:convert';
-import 'dart:io';
-import 'dart:math';
-
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 
 import 'session_history.dart';
+import 'participant_store.dart';
+export 'participant_store.dart';
 
 HistoryMetadata participantMetadata(
   HistoryMetadata old,
@@ -17,137 +14,11 @@ HistoryMetadata participantMetadata(
   notes: old.notes,
   tags: old.tags,
   eventNotes: Map.of(old.eventNotes),
+  eventLabels: Map.of(old.eventLabels),
   participantId: participantId,
   participantName: name.trim().isEmpty ? 'unassigned' : name.trim(),
   userInfo: info.trim(),
 );
-
-class ParticipantProfile {
-  const ParticipantProfile(this.id, this.name, this.info);
-  final String id, name, info;
-}
-
-/// Append-only local profiles. Version-1 names retain deterministic IDs;
-/// version-2 edits address IDs so renames never create a different person.
-class ParticipantStore {
-  ParticipantStore({this.directoryProvider});
-  final Future<Directory> Function()? directoryProvider;
-  // Keep only pending writes. Retaining a completed Future also retains its
-  // creation zone, which can outlive a widget-test fake clock.
-  static Future<void>? _writes;
-  Future<File> _file() async {
-    final root =
-        await (directoryProvider ?? getApplicationDocumentsDirectory)();
-    return File('${root.path}/participants_v1.jsonl');
-  }
-
-  Future<Map<String, ParticipantProfile>> _read() async {
-    final file = await _file();
-    final values = <String, ParticipantProfile>{};
-    if (!await file.exists()) return values;
-    for (final line in await file.readAsLines()) {
-      if (line.trim().isEmpty) continue;
-      final row = jsonDecode(line);
-      if (row is! Map ||
-          (row['version'] != 1 && row['version'] != 2) ||
-          row['name'] is! String ||
-          row['info'] is! String ||
-          (row['version'] == 2 &&
-              (row['participant_id'] is! String ||
-                  (row['participant_id'] as String).isEmpty))) {
-        throw const FormatException(
-          'Unreadable participant file; original preserved',
-        );
-      }
-      final name = row['name'] as String;
-      final id = row['version'] == 1
-          ? 'legacy-${base64Url.encode(utf8.encode(name))}'
-          : row['participant_id'] as String;
-      values[id] = ParticipantProfile(id, name, row['info'] as String);
-    }
-    return values;
-  }
-
-  Future<Map<String, ParticipantProfile>> profiles() async {
-    final pending = _writes;
-    if (pending != null) {
-      await pending;
-    }
-    return _read();
-  }
-
-  Future<Map<String, String>> list() async => {
-    for (final p in (await profiles()).values) p.name: p.info,
-  };
-  Future<ParticipantProfile> save(String name, String info, {String? id}) {
-    final operation = (_writes ?? Future<void>.value()).then((_) async {
-      name = name.trim();
-      info = info.trim();
-      if (name.isEmpty || name.length > 120 || info.length > 4000) {
-        throw const FormatException(
-          'Enter a name up to 120 characters and information up to 4000 characters',
-        );
-      }
-      final existing = await _read(); // Validate before appending.
-      if (id != null && !existing.containsKey(id)) {
-        throw const FormatException(
-          'Participant no longer exists; choose a saved profile',
-        );
-      }
-      final random = Random.secure();
-      final assigned =
-          id ??
-          'p-${List.generate(16, (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0')).join()}';
-      final file = await _file();
-      await file.parent.create(recursive: true);
-      await file.writeAsString(
-        '${jsonEncode({'version': 2, 'participant_id': assigned, 'name': name, 'info': info, 'updated_utc': DateTime.now().toUtc().toIso8601String()})}\n',
-        mode: FileMode.append,
-        flush: true,
-      );
-      return ParticipantProfile(assigned, name, info);
-    });
-    late final Future<void> pending;
-    void release() {
-      // A later queued write owns the tail until its own completion.
-      if (identical(_writes, pending)) {
-        _writes = null;
-      }
-    }
-
-    pending = operation.then<void>(
-      (_) => release(),
-      onError: (Object _) => release(),
-    );
-    _writes = pending;
-    return operation;
-  }
-
-  Future<ParticipantProfile> resolve(
-    String name,
-    String info, {
-    String? id,
-  }) async {
-    final profiles = await this.profiles();
-    if (id != null) {
-      final profile = profiles[id];
-      if (profile == null) {
-        throw const FormatException('Choose an existing participant');
-      }
-      return profile;
-    }
-    final matches = profiles.values
-        .where((p) => p.name == name.trim())
-        .toList();
-    if (matches.length > 1) {
-      throw const FormatException(
-        'Several participants have this name. Choose a saved profile.',
-      );
-    }
-    if (matches.isEmpty) return save(name, info);
-    return matches.single;
-  }
-}
 
 Future<(String, String, String)?> editParticipant(
   BuildContext context, {
@@ -189,6 +60,9 @@ class _ParticipantDialogState extends State<_ParticipantDialog> {
   );
   late final _info = TextEditingController(text: widget.info);
   late String? _selected = widget.participantId;
+  late final _identifier = TextEditingController(
+    text: widget.participantId ?? '',
+  );
   Map<String, ParticipantProfile> _saved = {};
   bool _busy = false, _loading = true;
   String? _error;
@@ -206,6 +80,7 @@ class _ParticipantDialogState extends State<_ParticipantDialog> {
               if (selected != null) {
                 _name.text = selected.name;
                 _info.text = selected.info;
+                _identifier.text = selected.id;
               }
               if (_selected != null && !values.containsKey(_selected)) {
                 _error = 'Assigned profile is missing; choose a participant';
@@ -228,6 +103,7 @@ class _ParticipantDialogState extends State<_ParticipantDialog> {
   void dispose() {
     _name.dispose();
     _info.dispose();
+    _identifier.dispose();
     super.dispose();
   }
 
@@ -237,7 +113,12 @@ class _ParticipantDialogState extends State<_ParticipantDialog> {
       _error = null;
     });
     try {
-      final p = await widget.store.save(_name.text, _info.text, id: _selected);
+      final p = await widget.store.save(
+        _name.text,
+        _info.text,
+        id: _selected,
+        newId: _identifier.text,
+      );
       if (mounted) Navigator.pop(context, (p.name, p.info, p.id));
     } catch (error) {
       if (mounted) setState(() => _error = '$error');
@@ -283,6 +164,7 @@ class _ParticipantDialogState extends State<_ParticipantDialog> {
                       final p = _saved[_selected];
                       _name.text = p?.name ?? '';
                       _info.text = p?.info ?? '';
+                      _identifier.text = p?.id ?? '';
                     }),
             ),
           TextField(
@@ -300,9 +182,17 @@ class _ParticipantDialogState extends State<_ParticipantDialog> {
               labelText: 'User information / notes',
             ),
           ),
+          TextField(
+            controller: _identifier,
+            enabled: !_busy && !_loading,
+            maxLength: 128,
+            decoration: const InputDecoration(
+              labelText: 'Participant identifier (blank generates one)',
+            ),
+          ),
           if (_selected != null)
             const Text(
-              'Editing a saved profile keeps its permanent ID and updates its directory name.',
+              'Changing the identifier records a correction linking the old ID to the new one. Original capture IDs are preserved.',
             ),
           if (widget.correction)
             const Text(
@@ -353,6 +243,65 @@ class _ParticipantsScreenState extends State<ParticipantsScreen> {
       setState(() {
         _values = widget.store.profiles();
       });
+    }
+  }
+
+  Future<void> _merge(ParticipantProfile source) async {
+    final profiles = await widget.store.profiles();
+    if (!mounted) return;
+    final target = await showDialog<String>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: Text('Merge ${source.name} (${source.id}) into…'),
+        children: [
+          const Padding(
+            padding: EdgeInsets.all(12),
+            child: Text(
+              'The selected target profile becomes authoritative. Old IDs remain linked; recordings are not rewritten. Choose only if both profiles are the same person.',
+            ),
+          ),
+          for (final p in profiles.values.where((p) => p.id != source.id))
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(context, p.id),
+              child: Text('${p.name} · ${p.id}'),
+            ),
+        ],
+      ),
+    );
+    if (target == null || !mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirm same person'),
+        content: Text('Link ${source.id} to $target?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Merge'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      final p = profiles[target]!;
+      await widget.store.save(
+        p.name,
+        p.info,
+        id: source.id,
+        newId: p.id,
+        merge: true,
+      );
+      if (mounted) setState(() => _values = widget.store.profiles());
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$error')));
+      }
     }
   }
 
@@ -413,7 +362,7 @@ class _ParticipantsScreenState extends State<ParticipantsScreen> {
                   const ListTile(
                     title: Text('Participant profiles'),
                     subtitle: Text(
-                      'Names can change; permanent IDs keep assigned sessions together. Older sessions can be assigned from History.',
+                      'Phone profiles are authoritative. Edit names and identifiers or explicitly merge duplicates. Original capture IDs remain traceable.',
                     ),
                   ),
                   if (profiles.isEmpty)
@@ -427,6 +376,11 @@ class _ParticipantsScreenState extends State<ParticipantsScreen> {
                             subtitle: Text('${p.info}\nID: ${p.id}'),
                             trailing: const Icon(Icons.edit_outlined),
                             onTap: () => _edit(p),
+                          ),
+                          TextButton.icon(
+                            onPressed: () => _merge(p),
+                            icon: const Icon(Icons.merge),
+                            label: const Text('Merge duplicate participant'),
                           ),
                           if (widget.onViewSessions != null)
                             TextButton.icon(

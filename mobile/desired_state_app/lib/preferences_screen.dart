@@ -73,7 +73,9 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
       title: Text(
-        widget.streams == null ? 'Customize Live' : 'Recording settings',
+        widget.streams == null
+            ? 'Session display settings'
+            : 'Recording settings',
       ),
       actions: [
         TextButton(
@@ -89,7 +91,7 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
         if (!_ready && _error == null) const LinearProgressIndicator(),
         if (_ready && widget.streams == null) ...[
           const ListTile(
-            title: Text('Visible on Live'),
+            title: Text('Visible during Session'),
             subtitle: Text('Display choices do not change recording.'),
           ),
           SwitchListTile(

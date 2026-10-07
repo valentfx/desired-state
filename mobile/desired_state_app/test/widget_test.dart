@@ -16,9 +16,17 @@ void main() {
 
       expect(find.text('Overview'), findsOneWidget);
       expect(find.text('Scan for devices'), findsNothing);
-      await openScreen(tester, 'Live');
+      await openScreen(tester, 'Session');
       await tester.pump();
-      expect(find.text('Desired State'), findsOneWidget);
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is AppBar &&
+              widget.title is Text &&
+              (widget.title as Text).data == 'Session',
+        ),
+        findsOneWidget,
+      );
       expect(find.text('Scan for devices'), findsNothing);
       await tester.tap(find.text('Connect devices'));
       await tester.pumpAndSettle();

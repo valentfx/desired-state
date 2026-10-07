@@ -298,12 +298,14 @@ class SessionTimelineScreen extends StatefulWidget {
     required this.title,
     this.end,
     this.controller,
+    this.embedded = false,
   });
   final Directory directory;
   final DateTime origin;
   final DateTime? end;
   final String title;
   final SessionController? controller;
+  final bool embedded;
   @override
   State<SessionTimelineScreen> createState() => _SessionTimelineScreenState();
 }
@@ -410,16 +412,18 @@ class _SessionTimelineScreenState extends State<SessionTimelineScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: Text(widget.title),
-      actions: [
-        IconButton(
-          tooltip: 'Refresh signals',
-          onPressed: _loading ? null : _refresh,
-          icon: const Icon(Icons.refresh),
-        ),
-      ],
-    ),
+    appBar: widget.embedded
+        ? null
+        : AppBar(
+            title: Text(widget.title),
+            actions: [
+              IconButton(
+                tooltip: 'Refresh signals',
+                onPressed: _loading ? null : _refresh,
+                icon: const Icon(Icons.refresh),
+              ),
+            ],
+          ),
     body: ListView(
       padding: const EdgeInsets.all(12),
       children: [
@@ -428,6 +432,12 @@ class _SessionTimelineScreenState extends State<SessionTimelineScreen> {
           spacing: 8,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
+            if (widget.embedded)
+              IconButton(
+                tooltip: 'Refresh signals',
+                onPressed: _loading ? null : _refresh,
+                icon: const Icon(Icons.refresh),
+              ),
             ChoiceChip(
               label: const Text('Follow live'),
               selected: _follow,

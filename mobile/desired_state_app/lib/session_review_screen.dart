@@ -19,8 +19,10 @@ class SessionReviewScreen extends StatefulWidget {
     this.replayLoader,
     this.controller,
     this.onLive,
+    this.embedded = false,
   });
   final SessionController? controller;
+  final bool embedded;
   final VoidCallback? onLive;
   final HistorySession session;
   final SessionHistoryRepository repository;
@@ -328,7 +330,9 @@ class _SessionReviewScreenState extends State<SessionReviewScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Session analysis')),
+    appBar: widget.embedded
+        ? null
+        : AppBar(title: const Text('Session analysis')),
     body: FutureBuilder<SignalReview>(
       future: _signals,
       builder: (context, snapshot) {
@@ -357,8 +361,8 @@ class _SessionReviewScreenState extends State<SessionReviewScreen> {
                         title: Text(
                           widget.controller!.recordingState ==
                                   RecordingState.paused
-                              ? 'Recording paused in Live'
-                              : 'Recording continues in Live',
+                              ? 'Recording paused in Session'
+                              : 'Recording continues in Session',
                         ),
                         trailing: TextButton(
                           onPressed:
@@ -367,7 +371,7 @@ class _SessionReviewScreenState extends State<SessionReviewScreen> {
                                 context,
                                 (route) => route.isFirst,
                               ),
-                          child: const Text('Live'),
+                          child: const Text('Session'),
                         ),
                       ),
               ),

@@ -204,7 +204,11 @@ void main() {
   testWidgets(
     'Analyze filters permanent IDs and opens all or selected sessions',
     (tester) async {
+      final root = Directory.systemTemp.createTempSync(
+        'participant-type-filter-',
+      );
       final controller = SessionController(
+        directoryProvider: () async => root,
         service: FakePolar(),
         foregroundService: FakeForeground(),
       );
@@ -226,9 +230,15 @@ void main() {
             ),
           ),
         );
-        await tester.pumpAndSettle();
+        await settleIo(
+          tester,
+          () => find
+              .text('Renamed · All dates · 1 sessions')
+              .evaluate()
+              .isNotEmpty,
+        );
         expect(find.text('Renamed · All dates · 1 sessions'), findsOneWidget);
-        await tester.tap(find.byType(DropdownButton<String>));
+        await tester.tap(find.byType(DropdownButton<String>).last);
         await tester.pumpAndSettle();
         await tester.tap(find.text('All participants').last);
         await tester.pumpAndSettle();
@@ -236,7 +246,7 @@ void main() {
           find.text('All participants · All dates · 2 sessions'),
           findsOneWidget,
         );
-        await tester.tap(find.byType(DropdownButton<String>));
+        await tester.tap(find.byType(DropdownButton<String>).last);
         await tester.pumpAndSettle();
         await tester.tap(find.text('Other · p-second').last);
         await tester.pumpAndSettle();
@@ -244,6 +254,7 @@ void main() {
       } finally {
         await tester.pumpWidget(const SizedBox.shrink());
         controller.dispose();
+        await tester.runAsync(() => root.delete(recursive: true));
       }
     },
   );

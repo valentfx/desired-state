@@ -146,6 +146,8 @@ void main() {
         200,
         scrollable: find.byType(Scrollable).first,
       );
+      await tester.ensureVisible(find.text('Current screened'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Current screened'));
       await tester.pump();
       final rrFinder = find.byWidgetPredicate(
@@ -270,13 +272,13 @@ void main() {
       );
       await settleIo(
         tester,
-        () => find.byTooltip('Live settings').evaluate().isNotEmpty,
+        () => find.byTooltip('Session settings').evaluate().isNotEmpty,
       );
       debugPrint('Active History: opening advanced tools');
       await tester.tap(find.byTooltip('Advanced tools'));
       await settleIo(
         tester,
-        () => find.text('Advanced live tools').evaluate().isNotEmpty,
+        () => find.text('Session tools').evaluate().isNotEmpty,
       );
       debugPrint('Active History: loading session list');
       await tester.tap(find.text('History'));
@@ -313,7 +315,7 @@ void main() {
       await tester.tap(
         find.descendant(
           of: find.byType(RecordingHistoryBanner),
-          matching: find.text('Live'),
+          matching: find.text('Session'),
         ),
       );
       await settleIo(

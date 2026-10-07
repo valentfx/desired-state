@@ -370,3 +370,21 @@ Merged remote cloud upload, persistent upload status and lossless compression wi
 
 ## Work PC desktop integration 20261007-105736
 Integrated remote cloud uploads, upload status and lossless compression with local state feedback and activity markers. Merge conflicts resolved. Flutter analysis, full tests and Windows release build passed on the work PC. Backend deployment and Android installation were not part of this validation.
+
+## Annotation and phone-master participant update
+Desktop annotations/profile/motion update 978e508: audited event label and note edits, session notes, marker-line selection; 30-second Add note expiry; explicit follow-up ratings for legacy/goal-less sessions; recorded posture and ring/H10 motion plots; phone-master profile identifier correction and confirmed duplicate merges; verified USB profile mirroring; recoverable local session trash and sync exclusions. Raw capture files remain unchanged. Unsynchronized desktop annotation revisions block phone replacement for that session pending reconciliation. Profile journal version 3 requires both apps updated before identity corrections. Trash uses space; cloud deletion, cloud profile ingestion, trash restore/purge UI and bidirectional annotation merging are pending. No oxygen/posture observations are fabricated. Flutter runtime validation is required on the PC; this workspace only ran Git diff checks.
+
+
+## Live controls update 2026-10-07
+Applied persistent participant defaults, event picker with automatic dismissal, goal-less live ratings with labeled markers, and History toolbar deletion. Source backup: F:\1dev\desired-state-live-controls-backup-20261007-144036. Runtime checks pending. Original participant IDs and raw recordings retained.
+
+Live controls validation: Flutter analysis, full tests and debug APK build passed. Shared phone app upgraded in place and launched. Hardware/UI verification and Git commit/push remain pending.
+
+## General Session and analysis organization 2026 10 07
+User reports the previous live-controls code running on the phone. Prepared Session and Desired State navigation choices sharing one controller and persistent recording screen; navigation preserves the active capture's experience. General Session starts without guided setup and has optional remembered recording types. General overall-feeling answers use a new defined 1–10 question; legacy 0–10 answers and existing DS questions remain unchanged. Type definitions use stable IDs, append-only revisions, custom creation, editing and archiving, and per-recording snapshots. USB sync validates and mirrors the phone-owned type journal to Windows. Phone and desktop histories filter by stable type ID, with participant filtering retained or added. Old sessions remain Unspecified; no raw rows or identities are rewritten.
+Analyze now owns Summary, Signals and Analysis tools sections; completion opens the same workspace, and the former Review implementation is embedded rather than exposed as a second destination. Raw replay, baseline and EEG tools remain available. Desktop review export is relabeled Export analysis settings. Tests added for type revisions, corrupt-journal preservation, USB catalog publication, general start without setup, and overall scale/legacy compatibility; navigation tests updated for Session. Local patch replay, source delimiter and diff checks passed. Flutter formatting/analysis/tests and Windows/APK builds require the installer on the work PC. Backend uploads retain snapshots in manifests, but cloud catalog CRUD and normalized database type/protocol queries are not yet implemented. Protocol presets, bulk legacy type assignment and scientific comparability scoring remain follow-up work.
+
+
+Session structure test follow-up: updated renamed Session UI expectations, scoped participant dropdown selection and isolated the recording-type catalog fixture. Original analysis passed; full tests and builds pending resume. Test backup: F:\1dev\desired-state-session-test-fix-backup-20261007-153416.
+
+Session structure validation: Flutter analysis, full tests, Windows release and Android debug APK builds passed. Shared phone app upgraded in place and launched. Recording/type sync and UI hardware verification remain pending.

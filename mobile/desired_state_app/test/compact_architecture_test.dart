@@ -63,7 +63,7 @@ void main() {
       expect(find.byType(EcgLivePanel), findsNothing);
       expect(find.byType(EegLivePanel), findsNothing);
       expect(find.byType(CompactEegPanel), findsOneWidget);
-      expect(find.byTooltip('Live settings'), findsOneWidget);
+      expect(find.byTooltip('Session settings'), findsOneWidget);
       expect(find.byTooltip('Earlier data'), findsNothing);
       expect(find.byTooltip('Later data'), findsNothing);
       expect(find.byTooltip('Zoom in'), findsNothing);

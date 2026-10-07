@@ -9,6 +9,23 @@ import 'participant_tools.dart';
 import 'processing_screen.dart';
 import 'session_review_screen.dart';
 import 'session_timeline_screen.dart';
+import 'recording_types.dart';
+
+Future<void> openSessionAnalysis(
+  BuildContext context, {
+  required HistoryEntry entry,
+  required SessionController controller,
+  required SessionHistoryRepository repository,
+}) => Navigator.push(
+  context,
+  MaterialPageRoute<void>(
+    builder: (_) => HistoryDetailScreen(
+      entry: entry,
+      controller: controller,
+      repository: repository,
+    ),
+  ),
+);
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({
@@ -58,6 +75,16 @@ class _HistoryScreenState extends State<HistoryScreen> {
       _profileError =
           'Profile directory unavailable: $error. Recorded sessions remain accessible.';
     }
+    try {
+      _typeNames = {
+        for (final type in (await RecordingTypeStore(
+          directoryProvider: widget.controller.directoryProvider,
+        ).list()).values)
+          type.id: type.name,
+      };
+    } catch (_) {
+      _typeNames = {};
+    }
     final entries = await repository.list();
     return entries;
   }
@@ -68,6 +95,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
       ? _profiles[_participantId]?.name ?? _participantId!
       : _user ?? 'All participants';
   String _query = '';
+  String _recordingTypeFilter = '';
+  Map<String, String> _typeNames = {};
   final _search = TextEditingController();
   String? _user;
   final _identifier = TextEditingController();
@@ -200,8 +229,20 @@ class _HistoryScreenState extends State<HistoryScreen> {
                       .whereType<String>(),
                   ?_participantId,
                 };
+                final typeLabels = <String, String>{
+                  for (final entry in snapshot.data!)
+                    recordingTypeId(entry.manifest):
+                        _typeNames[recordingTypeId(entry.manifest)] ??
+                        recordingTypeLabel(entry.manifest),
+                };
                 final entries = snapshot.data!
                     .where(filter.matches)
+                    .where(
+                      (entry) =>
+                          _recordingTypeFilter.isEmpty ||
+                          recordingTypeId(entry.manifest) ==
+                              _recordingTypeFilter,
+                    )
                     .where(
                       (entry) => _user == null || entry.participantId == null,
                     )
@@ -212,6 +253,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         _label(entry),
                         entry.participantId ?? '',
                         entry.device,
+                        recordingTypeLabel(entry.manifest),
+                        _typeNames[recordingTypeId(entry.manifest)] ?? '',
+                        recordingTypeId(entry.manifest),
                         entry.metadata.description,
                         entry.metadata.notes,
                         entry.metadata.userInfo,
@@ -232,7 +276,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         initiallyExpanded:
                             widget.analyze ||
                             widget.initialParticipantId != null,
-                        title: const Text('Filter by participant, ID, date'),
+                        title: const Text(
+                          'Filter by participant, type and date',
+                        ),
                         subtitle: Text(
                           '$_filterLabel · ${_dates == null ? 'All dates' : '${_dates!.start.toLocal().toString().split(' ').first} to ${_dates!.end.toLocal().toString().split(' ').first}'} · ${entries.length} sessions',
                         ),
@@ -246,6 +292,36 @@ class _HistoryScreenState extends State<HistoryScreen> {
                             padding: const EdgeInsets.all(12),
                             child: Column(
                               children: [
+                                DropdownButton<String>(
+                                  isExpanded: true,
+                                  value: _recordingTypeFilter,
+                                  items: [
+                                    const DropdownMenuItem(
+                                      value: '',
+                                      child: Text('All recording types'),
+                                    ),
+                                    for (final item in typeLabels.entries)
+                                      DropdownMenuItem(
+                                        value: item.key,
+                                        child: Text(
+                                          '${item.value} · ${item.key}',
+                                        ),
+                                      ),
+                                    if (_recordingTypeFilter.isNotEmpty &&
+                                        !typeLabels.containsKey(
+                                          _recordingTypeFilter,
+                                        ))
+                                      DropdownMenuItem(
+                                        value: _recordingTypeFilter,
+                                        child: Text(
+                                          'Selected type unavailable',
+                                        ),
+                                      ),
+                                  ],
+                                  onChanged: (value) => setState(
+                                    () => _recordingTypeFilter = value ?? '',
+                                  ),
+                                ),
                                 DropdownButton<String>(
                                   isExpanded: true,
                                   value: _participantId != null
@@ -422,7 +498,7 @@ class RecordingHistoryBanner extends StatelessWidget {
                 onPressed:
                     onLive ??
                     () => Navigator.popUntil(context, (route) => route.isFirst),
-                child: const Text('Live'),
+                child: const Text('Session'),
               ),
             ],
           ),
@@ -449,6 +525,7 @@ class HistoryDetailScreen extends StatefulWidget {
 }
 
 class _HistoryDetailScreenState extends State<HistoryDetailScreen> {
+  int _analysisSection = 0;
   late Future<HistorySession> _loading = widget.repository.open(widget.entry);
   bool _screened = false, _exporting = false;
   RangeValues _range = const RangeValues(0, 1);
@@ -471,6 +548,39 @@ class _HistoryDetailScreenState extends State<HistoryDetailScreen> {
     );
     if (mounted) {
       _reload();
+    }
+  }
+
+  Future<void> _delete(HistoryEntry entry) async {
+    if (widget.repository.isActive(entry.id)) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete local session?'),
+        content: Text(
+          '${entry.id} will move to recoverable trash on this phone. Desktop and cloud copies are retained. Trash still uses storage space.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await widget.repository.deleteSession(entry);
+      if (mounted) Navigator.pop(context);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$error')));
+      }
     }
   }
 
@@ -499,8 +609,52 @@ class _HistoryDetailScreenState extends State<HistoryDetailScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
-      title: const Text('Session history'),
+      title: const Text('Session analysis'),
+      bottom: PreferredSize(
+        preferredSize: const Size.fromHeight(48),
+        child: Row(
+          children: [
+            Expanded(
+              child: TextButton(
+                onPressed: () => setState(() => _analysisSection = 0),
+                child: Text(_analysisSection == 0 ? 'Summary ✓' : 'Summary'),
+              ),
+            ),
+            Expanded(
+              child: TextButton(
+                onPressed: () => setState(() => _analysisSection = 1),
+                child: Text(_analysisSection == 1 ? 'Signals ✓' : 'Signals'),
+              ),
+            ),
+            Expanded(
+              child: TextButton(
+                onPressed: () => setState(() => _analysisSection = 2),
+                child: Text(
+                  _analysisSection == 2 ? 'Analysis tools ✓' : 'Analysis tools',
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
       actions: [
+        if (widget.controller.sessionLogger?.sessionId != widget.entry.id)
+          IconButton(
+            tooltip: 'Delete local session',
+            icon: const Icon(Icons.delete_outline),
+            onPressed: () async {
+              try {
+                await _delete(
+                  await widget.repository.readEntry(widget.entry.directory),
+                );
+              } catch (error) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context)
+                      .showSnackBar(SnackBar(content: Text('$error')));
+                }
+              }
+            },
+          ),
         IconButton(
           tooltip: 'State feedback',
           icon: const Icon(Icons.sentiment_satisfied_alt),
@@ -572,6 +726,36 @@ class _HistoryDetailScreenState extends State<HistoryDetailScreen> {
                   return const Center(child: CircularProgressIndicator());
                 }
                 final session = snapshot.data!, entry = session.entry;
+                if (_analysisSection == 2) {
+                  return SessionReviewScreen(
+                    key: ValueKey(entry.id),
+                    session: session,
+                    repository: widget.repository,
+                    controller: widget.controller,
+                    onLive: widget.onLive,
+                    embedded: true,
+                  );
+                }
+                if (_analysisSection == 1) {
+                  return SessionTimelineScreen(
+                    key: ValueKey(entry.id),
+                    directory: entry.directory,
+                    origin: entry.started ?? DateTime(1970),
+                    end: entry.events
+                        .map(
+                          (event) =>
+                              DateTime.tryParse('${event['received_utc']}'),
+                        )
+                        .whereType<DateTime>()
+                        .fold<DateTime?>(
+                          null,
+                          (a, b) => a == null || b.isAfter(a) ? b : a,
+                        ),
+                    title: 'Session signals',
+                    controller: widget.controller,
+                    embedded: true,
+                  );
+                }
                 final active = widget.repository.isActive(entry.id);
                 final eventTimes = entry.events
                     .where((r) => r['event'] == 'marked_event')
@@ -601,47 +785,6 @@ class _HistoryDetailScreenState extends State<HistoryDetailScreen> {
                 return ListView(
                   padding: const EdgeInsets.all(12),
                   children: [
-                    if (!active)
-                      FilledButton.icon(
-                        onPressed: () => Navigator.push(
-                          context,
-                          MaterialPageRoute<void>(
-                            builder: (_) => SessionReviewScreen(
-                              session: session,
-                              repository: widget.repository,
-                              controller: widget.controller,
-                              onLive: widget.onLive,
-                            ),
-                          ),
-                        ),
-                        icon: const Icon(Icons.analytics_outlined),
-                        label: const Text('Review session'),
-                      ),
-                    OutlinedButton.icon(
-                      icon: const Icon(Icons.show_chart),
-                      label: const Text('All session signals'),
-                      onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute<void>(
-                          builder: (_) => SessionTimelineScreen(
-                            directory: entry.directory,
-                            origin: entry.started ?? DateTime(1970),
-                            end: entry.events
-                                .map(
-                                  (e) =>
-                                      DateTime.tryParse('${e['received_utc']}'),
-                                )
-                                .whereType<DateTime>()
-                                .fold<DateTime?>(
-                                  null,
-                                  (a, b) => a == null || b.isAfter(a) ? b : a,
-                                ),
-                            title: 'Session signals',
-                            controller: widget.controller,
-                          ),
-                        ),
-                      ),
-                    ),
                     Text(
                       entry.participant,
                       style: Theme.of(context).textTheme.titleLarge,
@@ -761,7 +904,10 @@ class _HistoryDetailScreenState extends State<HistoryDetailScreen> {
                                   : event['event'] ==
                                         'processing_configuration_changed'
                                   ? 'Analysis settings changed'
-                                  : '${event['marker_label'] ?? event['description'] ?? event['event'] ?? 'Event'}',
+                                  : entry.metadata.eventLabels[entry.eventId(
+                                          event,
+                                        )] ??
+                                        '${event['marker_label'] ?? event['description'] ?? event['event'] ?? 'Event'}',
                             ),
                             subtitle: Text(
                               '${event['received_utc'] ?? 'Unknown time'} · ${event['event']}\n${entry.metadata.eventNotes[entry.eventId(event)] ?? ''}',
@@ -969,6 +1115,18 @@ class _HistoryMetadataEditorState extends State<HistoryMetadataEditor> {
         ? widget.entry.metadata.notes
         : widget.entry.metadata.eventNotes[widget.eventId] ?? '',
   );
+  late final _eventLabel = TextEditingController(
+    text: widget.eventId == null
+        ? ''
+        : widget.entry.metadata.eventLabels[widget.eventId] ??
+              widget.entry.events
+                  .where(
+                    (event) => widget.entry.eventId(event) == widget.eventId,
+                  )
+                  .map((event) => '${event['marker_label'] ?? 'Event'}')
+                  .firstOrNull ??
+              'Event',
+  );
   late final _tags = TextEditingController(
     text: widget.entry.metadata.tags.join(', '),
   );
@@ -979,6 +1137,7 @@ class _HistoryMetadataEditorState extends State<HistoryMetadataEditor> {
     _description.dispose();
     _notes.dispose();
     _tags.dispose();
+    _eventLabel.dispose();
     super.dispose();
   }
 
@@ -1008,6 +1167,10 @@ class _HistoryMetadataEditorState extends State<HistoryMetadataEditor> {
         description: _description.text.trim(),
         notes: widget.eventId == null ? _notes.text.trim() : old.notes,
         tags: tags,
+        eventLabels: {
+          ...old.eventLabels,
+          if (widget.eventId != null) widget.eventId!: _eventLabel.text.trim(),
+        },
         eventNotes: {
           ...old.eventNotes,
           if (widget.eventId != null) widget.eventId!: _notes.text.trim(),
@@ -1049,6 +1212,15 @@ class _HistoryMetadataEditorState extends State<HistoryMetadataEditor> {
               onLive: widget.onLive,
             ),
           if (_error != null) Text(_error!),
+          if (widget.eventId != null)
+            TextField(
+              controller: _eventLabel,
+              enabled: !_saving,
+              maxLength: 120,
+              decoration: const InputDecoration(
+                labelText: 'Event label (audited display correction)',
+              ),
+            ),
           if (widget.eventId == null)
             TextField(
               controller: _description,

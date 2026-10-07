@@ -14,6 +14,9 @@ import 'upload_status.dart';
 import 'desktop_sync.dart';
 import 'desktop_inspection.dart';
 import 'session_history.dart';
+import 'history_screen.dart';
+import 'participant_store.dart';
+import 'recording_types.dart';
 import 'state_feedback_widgets.dart';
 
 class DesktopScreen extends StatefulWidget {
@@ -35,6 +38,8 @@ class _DesktopScreenState extends State<DesktopScreen> {
   double? _cursor;
   RangeValues? _sliderRange;
   String _query = '';
+  String _typeFilter = '', _participantFilter = '';
+  Map<String, String> _typeNames = {};
   Timer? _inspectionTimer;
   int _inspectionGeneration = 0;
   bool _inspectionLoading = false;
@@ -56,6 +61,147 @@ class _DesktopScreenState extends State<DesktopScreen> {
         return;
       }
       setState(() => _uploadStatuses[entry.id] = status);
+    }
+  }
+
+  Future<void> _showParticipants() async {
+    try {
+      final profiles = await ParticipantStore(
+        directoryProvider: () async => Directory(_root!).parent,
+      ).profiles();
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Participants · phone master'),
+          content: SizedBox(
+            width: 500,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Edit names, identifiers and duplicate profiles on the phone, then Sync phone. The desktop uses the validated phone directory.',
+                  ),
+                  if (profiles.isEmpty)
+                    const Text(
+                      'No phone profiles synced yet. Older session name snapshots remain available.',
+                    ),
+                  for (final profile in profiles.values)
+                    ListTile(
+                      title: Text(profile.name),
+                      subtitle: SelectableText(
+                        '${profile.id}\n${profile.info}',
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+    } catch (error) {
+      if (mounted) setState(() => _error = '$error');
+    }
+  }
+
+  Future<void> _deleteSelected() async {
+    final entry = _entry;
+    if (entry == null || _busy || !entry.ended) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete local session?'),
+        content: Text(
+          '${entry.id} will move to recoverable trash on this PC. Phone and cloud copies are retained. Phone sync will skip this session on this PC.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      final repository = SessionHistoryRepository(
+        directoryProvider: () async => Directory(_root!).parent,
+      );
+      final trash = await repository.deleteSession(entry);
+      _clearInspection();
+      if (mounted) {
+        setState(() {
+          _entry = null;
+          _index = null;
+          _data = {};
+        });
+      }
+      await _reload();
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Moved to $trash')));
+      }
+    } catch (error) {
+      if (mounted) setState(() => _error = '$error');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _editNotes([String? eventId]) async {
+    final entry = _entry;
+    if (_busy || entry == null || !entry.ended || !entry.editsReadable) return;
+    final repository = SessionHistoryRepository(
+      directoryProvider: () async => Directory(_root!).parent,
+    );
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => HistoryMetadataEditor(
+          entry: entry,
+          repository: repository,
+          eventId: eventId,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    await _reload();
+    final updated = await repository.readEntry(entry.directory);
+    if (mounted) await _open(updated);
+  }
+
+  void _tapPlot(double time) {
+    _selectCursor(time);
+    final events =
+        _entry?.events
+            .where(
+              (event) =>
+                  event['event'] == 'marked_event' &&
+                  _eventTime(event) != null &&
+                  (_eventTime(event)! - time).abs() <=
+                      math.max(.25, (_end - _start) * .008),
+            )
+            .toList() ??
+        [];
+    if (events.isNotEmpty) {
+      events.sort(
+        (a, b) => (_eventTime(a)! - time).abs().compareTo(
+          (_eventTime(b)! - time).abs(),
+        ),
+      );
+      unawaited(_editNotes(_entry!.eventId(events.first)));
     }
   }
 
@@ -209,7 +355,7 @@ class _DesktopScreenState extends State<DesktopScreen> {
                 (_eventTime(e)! - _cursor!).abs() <= 10,
           ))
             Text(
-              'Nearby marker: ${event['marker_label'] ?? event['description'] ?? 'Event'} · ${_time(_eventTime(event)!)}',
+              'Nearby marker: ${_entry!.metadata.eventLabels[_entry!.eventId(event)] ?? event['marker_label'] ?? event['description'] ?? 'Event'} · ${_time(_eventTime(event)!)}',
             ),
           const Text(
             'Nearest original samples; each row shows its sample time and offset. No interpolation. RR timestamps refer to received packets.',
@@ -297,6 +443,16 @@ class _DesktopScreenState extends State<DesktopScreen> {
       directoryProvider: () async => Directory(_root!).parent,
     );
     final entries = await repository.list();
+    try {
+      _typeNames = {
+        for (final type in (await RecordingTypeStore(
+          directoryProvider: () async => Directory(_root!).parent,
+        ).list()).values)
+          type.id: type.name,
+      };
+    } catch (_) {
+      _typeNames = {};
+    }
     if (mounted) {
       setState(() => _sessions = entries);
       unawaited(_loadDetails(entries));
@@ -627,13 +783,89 @@ class _DesktopScreenState extends State<DesktopScreen> {
             onChanged: (v) => setState(() => _query = v.toLowerCase()),
           ),
         ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: DropdownButton<String>(
+            isExpanded: true,
+            value: _typeFilter,
+            hint: const Text('Recording type'),
+            items: [
+              const DropdownMenuItem(
+                value: '',
+                child: Text('All recording types'),
+              ),
+              for (final type in {
+                for (final entry in _sessions)
+                  recordingTypeId(entry.manifest):
+                      _typeNames[recordingTypeId(entry.manifest)] ??
+                      recordingTypeLabel(entry.manifest),
+              }.entries)
+                DropdownMenuItem(
+                  value: type.key,
+                  child: Text(type.value, overflow: TextOverflow.ellipsis),
+                ),
+              if (_typeFilter.isNotEmpty &&
+                  !_sessions.any(
+                    (e) => recordingTypeId(e.manifest) == _typeFilter,
+                  ))
+                DropdownMenuItem(
+                  value: _typeFilter,
+                  child: const Text('Selected type unavailable'),
+                ),
+            ],
+            onChanged: (value) => setState(() => _typeFilter = value ?? ''),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: DropdownButton<String>(
+            isExpanded: true,
+            value: _participantFilter,
+            items: [
+              const DropdownMenuItem(
+                value: '',
+                child: Text('All participants'),
+              ),
+              for (final person in {
+                for (final entry in _sessions)
+                  entry.participantId ?? 'legacy:${entry.participant}':
+                      entry.participant,
+              }.entries)
+                DropdownMenuItem(
+                  value: person.key,
+                  child: Text(
+                    '${person.value} · ${person.key}',
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              if (_participantFilter.isNotEmpty &&
+                  !_sessions.any(
+                    (e) =>
+                        (e.participantId ?? 'legacy:${e.participant}') ==
+                        _participantFilter,
+                  ))
+                DropdownMenuItem(
+                  value: _participantFilter,
+                  child: const Text('Selected participant unavailable'),
+                ),
+            ],
+            onChanged: (value) =>
+                setState(() => _participantFilter = value ?? ''),
+          ),
+        ),
         Expanded(
           child: ListView(
             children: [
               for (final entry in _sessions)
-                if ('${entry.id} ${entry.participant} ${entry.metadata.description}'
-                    .toLowerCase()
-                    .contains(_query))
+                if ((_typeFilter.isEmpty ||
+                        recordingTypeId(entry.manifest) == _typeFilter) &&
+                    (_participantFilter.isEmpty ||
+                        (entry.participantId ??
+                                'legacy:${entry.participant}') ==
+                            _participantFilter) &&
+                    '${entry.id} ${entry.participant} ${entry.participantId ?? ''} ${entry.metadata.description} ${recordingTypeLabel(entry.manifest)}'
+                        .toLowerCase()
+                        .contains(_query))
                   Tooltip(
                     message: _details(entry),
                     waitDuration: const Duration(milliseconds: 400),
@@ -644,7 +876,7 @@ class _DesktopScreenState extends State<DesktopScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            '${entry.started?.toLocal().toString().split('.').first ?? entry.id}\n${entry.ended ? 'Complete' : 'Incomplete snapshot'} · ${_listDuration(entry)}\n${entry.metadata.description}',
+                            '${entry.started?.toLocal().toString().split('.').first ?? entry.id}\n${entry.ended ? 'Complete' : 'Incomplete snapshot'} · ${_listDuration(entry)}\n${recordingTypeLabel(entry.manifest)} · ${entry.metadata.description}',
                             maxLines: 4,
                           ),
                           Text(
@@ -692,6 +924,20 @@ class _DesktopScreenState extends State<DesktopScreen> {
         for (final count in _index?.rows.entries ?? <MapEntry<String, int>>[])
           Text('${count.key}: ${count.value}'),
         const SizedBox(height: 16),
+        TextButton.icon(
+          onPressed: _busy || !_entry!.ended || !_entry!.editsReadable
+              ? null
+              : () => _editNotes(),
+          icon: const Icon(Icons.edit_note),
+          label: const Text('Edit session notes'),
+        ),
+        const Text(
+          'Select a marker line in a plot or use its pencil to edit the note. Original samples and marker labels are preserved.',
+        ),
+        if ((_index?.rows['o2ring_measurements'] ?? 0) == 0)
+          const Text(
+            'No decoded O2Ring measurements found in this session. Check phone recording and sync; raw packets alone do not provide oxygen values.',
+          ),
         Text('Events', style: Theme.of(context).textTheme.titleMedium),
         for (final event in _entry!.events.where(
           (e) => e['event'] == 'marked_event',
@@ -699,7 +945,17 @@ class _DesktopScreenState extends State<DesktopScreen> {
           ListTile(
             dense: true,
             contentPadding: EdgeInsets.zero,
-            title: Text('${event['marker_label'] ?? event['event']}'),
+            title: Text(
+              _entry!.metadata.eventLabels[_entry!.eventId(event)] ??
+                  '${event['marker_label'] ?? event['event']}',
+            ),
+            trailing: IconButton(
+              tooltip: 'Edit event note',
+              icon: const Icon(Icons.edit_note),
+              onPressed: _busy || !_entry!.ended || !_entry!.editsReadable
+                  ? null
+                  : () => _editNotes(_entry!.eventId(event)),
+            ),
             subtitle: Text(
               '${_eventTime(event) == null ? '' : _time(_eventTime(event)!)} ${event['description'] ?? ''}\n${_entry!.metadata.eventNotes[_entry!.eventId(event)] ?? ''}',
             ),
@@ -893,6 +1149,7 @@ class _DesktopScreenState extends State<DesktopScreen> {
                       markers: markers,
                       timeLabel: _time,
                       onCursor: _selectCursor,
+                      onMarkerTap: _tapPlot,
                     ),
                 const Text(
                   'Gaps remain gaps. EEG bands require every channel to pass the recorded screen. RMSSD uses recorded acceptance flags and is not ECG-validated. Overview plots preserve extrema through display reduction.',
@@ -911,6 +1168,18 @@ class _DesktopScreenState extends State<DesktopScreen> {
       title: const Text('Desired State · Analyze'),
       actions: [
         IconButton(
+          tooltip: 'Participants (phone master)',
+          icon: const Icon(Icons.people_outline),
+          onPressed: _busy || _root == null ? null : _showParticipants,
+        ),
+        IconButton(
+          tooltip: 'Delete local session',
+          icon: const Icon(Icons.delete_outline),
+          onPressed: _busy || _entry == null || !_entry!.ended
+              ? null
+              : _deleteSelected,
+        ),
+        IconButton(
           tooltip: 'Upload selected session',
           icon: const Icon(Icons.cloud_upload_outlined),
           onPressed: _busy || _entry == null || !_entry!.ended
@@ -924,16 +1193,18 @@ class _DesktopScreenState extends State<DesktopScreen> {
               ? null
               : () {
                   final entry = _entry!;
-                  Navigator.push(
+                  Navigator.push<void>(
                     context,
                     MaterialPageRoute<void>(
                       builder: (_) => SessionFeedbackScreen(
                         directory: entry.directory,
                         sessionId: entry.id,
-                        allowWrite: false,
+                        allowWrite: entry.ended,
                       ),
                     ),
-                  );
+                  ).then((_) {
+                    if (mounted) unawaited(_reload());
+                  });
                 },
         ),
         TextButton.icon(
@@ -962,7 +1233,7 @@ class _DesktopScreenState extends State<DesktopScreen> {
           ),
         ),
         IconButton(
-          tooltip: 'Save review',
+          tooltip: 'Export analysis settings',
           onPressed: _busy || _index == null ? null : _saveReview,
           icon: const Icon(Icons.save_alt),
         ),
@@ -1017,6 +1288,7 @@ class DesktopSignalPlot extends StatelessWidget {
     required this.markers,
     required this.timeLabel,
     required this.onCursor,
+    this.onMarkerTap,
   });
   final String title;
   final List<SignalPoint> points;
@@ -1025,6 +1297,7 @@ class DesktopSignalPlot extends StatelessWidget {
   final List<double> markers;
   final String Function(double) timeLabel;
   final ValueChanged<double> onCursor;
+  final ValueChanged<double>? onMarkerTap;
   @override
   Widget build(BuildContext context) {
     final finite = points.where((p) => p.$2.isFinite).toList();
@@ -1058,22 +1331,27 @@ class DesktopSignalPlot extends StatelessWidget {
               '$title${nearest == null ? (cursor == null ? '' : ' · No usable sample at cursor') : ' · ${timeLabel(nearest.$1)}: ${nearest.$2.toStringAsFixed(2)}'}',
               style: Theme.of(context).textTheme.titleSmall,
             ),
+            if (title == 'Sleep position (recorded estimate)')
+              const Text(
+                '0 Unknown · 1 On back · 2 Right side · 3 Left side · 4 Upright · 5 Prone · 6 Uncalibrated. Estimates, not sleep stages.',
+              ),
             if (finite.isEmpty)
               const Text('No usable samples; signal withheld or absent.'),
             SizedBox(
               height: 170,
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  void select(Offset position) => onCursor(
-                    start +
-                        ((position.dx - 65) /
-                                    math.max(1, constraints.maxWidth - 130))
-                                .clamp(0.0, 1.0) *
-                            (end - start),
-                  );
+                  double selectedTime(Offset position) =>
+                      start +
+                      ((position.dx - 65) /
+                                  math.max(1, constraints.maxWidth - 130))
+                              .clamp(0.0, 1.0) *
+                          (end - start);
                   return GestureDetector(
-                    onTapDown: (e) => select(e.localPosition),
-                    onPanUpdate: (e) => select(e.localPosition),
+                    onTapUp: (e) => (onMarkerTap ?? onCursor)(
+                      selectedTime(e.localPosition),
+                    ),
+                    onPanUpdate: (e) => onCursor(selectedTime(e.localPosition)),
                     child: CustomPaint(
                       size: Size(constraints.maxWidth, 170),
                       painter: DesktopLinePainter(

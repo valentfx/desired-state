@@ -15,9 +15,10 @@ import 'participant_tools.dart';
 import 'compact_eeg_panel.dart';
 import 'preferences_screen.dart';
 import 'session_timeline_screen.dart';
-import 'session_review_screen.dart';
 import 'settings_screen.dart';
 import 'state_feedback.dart';
+import 'recording_types.dart';
+import 'recording_type_screen.dart';
 import 'state_feedback_widgets.dart';
 
 void main() {
@@ -68,6 +69,10 @@ class _SessionHomeState extends State<SessionHome> {
   final _view = ValueNotifier<(int, int)>((0, 0));
 
   void _select(int index) {
+    // Both destinations share one recorder. Navigation cannot switch an active capture's flow.
+    if (widget.controller.sessionLogger != null && (index == 1 || index == 3)) {
+      index = widget.controller.sessionContext.experience == 'session' ? 1 : 3;
+    }
     _shell.currentState?.closeDrawer();
     _navigator.currentState?.popUntil((route) => route.isFirst);
     _view.value = (index, _view.value.$2 + 1);
@@ -98,8 +103,12 @@ class _SessionHomeState extends State<SessionHome> {
           listenable: Listenable.merge([widget.controller, _view]),
           builder: (context, _) => Text(
             widget.controller.sessionLogger == null
-                ? (_view.value.$1 == 1 ? 'Live' : 'Screens')
-                : '${_view.value.$1 == 1 ? 'Live · ' : ''}${widget.controller.recordingState == RecordingState.paused ? 'Paused' : 'Recording'} · ${widget.controller.participant}',
+                ? (_view.value.$1 == 3
+                      ? 'Desired State'
+                      : _view.value.$1 == 1
+                      ? 'Session'
+                      : 'Screens')
+                : '${_view.value.$1 == 1 || _view.value.$1 == 3 ? 'Session · ' : ''}${widget.controller.recordingState == RecordingState.paused ? 'Paused' : 'Recording'} · ${widget.controller.participant}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
@@ -110,7 +119,7 @@ class _SessionHomeState extends State<SessionHome> {
           child: ListView(
             children: [
               const ListTile(
-                title: Text('Desired State'),
+                title: Text('Desired State app'),
                 subtitle: Text('Screens and tools'),
               ),
               ListTile(
@@ -120,8 +129,13 @@ class _SessionHomeState extends State<SessionHome> {
               ),
               ListTile(
                 leading: const Icon(Icons.monitor_heart_outlined),
-                title: const Text('Live'),
+                title: const Text('Session'),
                 onTap: () => _select(1),
+              ),
+              ListTile(
+                leading: const Icon(Icons.self_improvement),
+                title: const Text('Desired State'),
+                onTap: () => _select(3),
               ),
               ListTile(
                 leading: const Icon(Icons.insights_outlined),
@@ -161,7 +175,7 @@ class _SessionHomeState extends State<SessionHome> {
             builder: (_) => ValueListenableBuilder<(int, int)>(
               valueListenable: _view,
               builder: (context, selection, _) => IndexedStack(
-                index: selection.$1,
+                index: selection.$1 == 3 ? 1 : selection.$1,
                 children: [
                   OverviewScreen(
                     controller: widget.controller,
@@ -172,6 +186,7 @@ class _SessionHomeState extends State<SessionHome> {
                   CollectorScreen(
                     key: _collector,
                     controller: widget.controller,
+                    guided: selection.$1 == 3,
                   ),
                   HistoryScreen(
                     controller: widget.controller,
@@ -190,7 +205,12 @@ class _SessionHomeState extends State<SessionHome> {
 }
 
 class CollectorScreen extends StatefulWidget {
-  const CollectorScreen({super.key, required this.controller});
+  const CollectorScreen({
+    super.key,
+    required this.controller,
+    this.guided = false,
+  });
+  final bool guided;
 
   final SessionController controller;
 
@@ -225,6 +245,8 @@ class _CollectorScreenState extends State<CollectorScreen> {
   void initState() {
     super.initState();
     _controller = widget.controller;
+    _restoreParticipantDefault();
+    _loadRecordingTypes();
     _controller.addListener(_refresh);
     _controller.loadUserSettings().catchError((Object error) {
       if (mounted) {
@@ -232,6 +254,37 @@ class _CollectorScreenState extends State<CollectorScreen> {
       }
     });
   }
+
+  Future<void> _restoreParticipantDefault() async {
+    try {
+      final profile = await ParticipantStore(
+        directoryProvider: _controller.directoryProvider,
+      ).lastParticipant();
+      if (!mounted ||
+          profile == null ||
+          _controller.sessionLogger != null ||
+          _participantNameController.text.isNotEmpty ||
+          _participantDefaultEdited) {
+        return;
+      }
+      setState(() {
+        _participantNameController.text = profile.name;
+        _controller.participant = profile.name;
+        _controller.participantInfo = profile.info;
+        _controller.participantId = profile.id;
+      });
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Participant default could not be loaded: $error'),
+          ),
+        );
+      }
+    }
+  }
+
+  bool _participantDefaultEdited = false;
 
   void _refresh() {
     if (mounted) {
@@ -249,7 +302,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
     context,
     MaterialPageRoute<void>(
       builder: (_) => Scaffold(
-        appBar: AppBar(title: const Text('Advanced live tools')),
+        appBar: AppBar(title: const Text('Session tools')),
         body: SafeArea(
           child: ListenableBuilder(
             listenable: _controller,
@@ -265,7 +318,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
                 const SizedBox(height: 16),
                 ListTile(
                   leading: const Icon(Icons.dashboard_customize_outlined),
-                  title: const Text('Customize Live'),
+                  title: const Text('Session display settings'),
                   onTap: () => Navigator.push(
                     context,
                     MaterialPageRoute<void>(
@@ -339,6 +392,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
 
   String _participantName() => _controller.participant;
   Future<void> _editParticipant() async {
+    _participantDefaultEdited = true;
     final active = _controller.sessionLogger != null;
     final values = await editParticipant(
       context,
@@ -363,6 +417,9 @@ class _CollectorScreenState extends State<CollectorScreen> {
         _participantNameController.text = values.$1;
         _controller.participantInfo = values.$2;
         _controller.participantId = values.$3;
+        _controller.participant = values.$1;
+        await ParticipantStore(directoryProvider: _controller.directoryProvider)
+            .rememberParticipant(values.$3);
       }
       if (mounted) {
         setState(() {});
@@ -397,27 +454,29 @@ class _CollectorScreenState extends State<CollectorScreen> {
   }
 
   Future<void> _rateSession(String phase) async {
-    // Capture the session before opening UI; never redirect a delayed answer.
     final logger = phase == 'post'
         ? _controller.lastSessionLogger
         : _controller.sessionLogger;
     if (logger == null || _controller.busy) {
       return;
     }
-    final config = _controller.sessionContext;
-    final participantId = logger.participantId;
+    var config = _controller.sessionContext;
+    int? value;
     if (config.question == FeedbackQuestion.goal &&
         config.desiredState.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Choose a rating question and desired state in Session setup before recording.',
-          ),
-        ),
+      final selection = await showSessionSetup(
+        context,
+        const SessionContext(question: FeedbackQuestion.energy),
+        ratingOnly: true,
       );
-      return;
+      if (selection == null || !mounted) {
+        return;
+      }
+      config = selection.context;
+      value = selection.value;
+    } else {
+      value = await showStateRating(context, config.question);
     }
-    final value = await showStateRating(context, config.question);
     if (value == null) {
       return;
     }
@@ -428,29 +487,139 @@ class _CollectorScreenState extends State<CollectorScreen> {
         phase: phase,
         source: 'live_app',
         desiredState: config.desiredState,
-        participantId: participantId,
+        participantId: logger.participantId,
       );
+      if (identical(_controller.sessionLogger, logger)) {
+        await _controller.markEvent(
+          '${config.question.label} $value/10',
+          label: '${config.question.id}: $value/10',
+        );
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Saved $phase rating: $value/10')),
         );
       }
-    } catch (e) {
+    } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Rating not saved: $e')));
+            .showSnackBar(SnackBar(content: Text('Rating not saved: $error')));
       }
     }
   }
+
+  late final _typeStore = RecordingTypeStore(
+    directoryProvider: _controller.directoryProvider,
+  );
+  Map<String, RecordingType> _recordingTypes = {
+    for (final type in defaultRecordingTypes) type.id: type,
+  };
+  String? _recordingTypeId;
+  bool _typeEdited = false;
+  String? _typeError;
+  Future<void> _loadRecordingTypes() async {
+    try {
+      final types = await _typeStore.list();
+      final last = await _typeStore.lastSelection();
+      if (mounted) {
+        setState(() {
+          _recordingTypes = types;
+          if (!_typeEdited) {
+            _recordingTypeId = last != null && types[last]?.archived == false
+                ? last
+                : null;
+          }
+          _typeError = null;
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() => _typeError = '$error');
+      }
+    }
+  }
+
+  Future<void> _manageRecordingTypes() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => RecordingTypeScreen(store: _typeStore),
+      ),
+    );
+    if (!mounted) {
+      return;
+    }
+    _typeEdited = false;
+    await _loadRecordingTypes();
+  }
+
+  Widget _recordingTypePicker() => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      DropdownButtonFormField<String>(
+        initialValue: _recordingTypeId ?? '',
+        key: ValueKey(_recordingTypeId),
+        decoration: const InputDecoration(labelText: 'Recording type optional'),
+        items: [
+          const DropdownMenuItem(value: '', child: Text('Unspecified')),
+          for (final type in _recordingTypes.values.where((t) => !t.archived))
+            DropdownMenuItem(value: type.id, child: Text(type.name)),
+        ],
+        onChanged: (id) async {
+          setState(() {
+            _typeEdited = true;
+            _recordingTypeId = id == '' ? null : id;
+          });
+          try {
+            await _typeStore.select(_recordingTypeId);
+          } catch (error) {
+            if (mounted) {
+              setState(() => _typeError = '$error');
+            }
+          }
+        },
+      ),
+      if (_typeError != null) Text('Recording type preference: $_typeError'),
+      TextButton.icon(
+        onPressed: _manageRecordingTypes,
+        icon: const Icon(Icons.edit_outlined),
+        label: const Text('Manage recording types'),
+      ),
+    ],
+  );
 
   Future<void> _startSession() async {
     await _controller.start(
       participantName: _participantNameController.text,
       participantProfileId: _controller.participantId,
-      context: _nextContext,
+      context: widget.guided
+          ? _nextContext
+          : SessionContext(
+              experience: 'session',
+              purpose: 'general_recording',
+              type: _recordingTypeId ?? 'unspecified',
+              question: FeedbackQuestion.overall,
+              recordingType: _recordingTypes[_recordingTypeId]?.toJson(),
+            ),
     );
     final startedLogger = _controller.sessionLogger;
-    final value = _preRating;
+    if (startedLogger != null && _controller.participantId != null) {
+      try {
+        await ParticipantStore(directoryProvider: _controller.directoryProvider)
+            .rememberParticipant(_controller.participantId!);
+      } catch (error) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Recording started; participant default could not be saved: $error',
+              ),
+            ),
+          );
+        }
+      }
+    }
+    final value = widget.guided ? _preRating : null;
     if (startedLogger != null) {
       _preRating = null;
       if (value != null) {
@@ -593,15 +762,11 @@ class _CollectorScreenState extends State<CollectorScreen> {
       if (!mounted) {
         return;
       }
-      await Navigator.push(
+      await openSessionAnalysis(
         context,
-        MaterialPageRoute<void>(
-          builder: (_) => SessionReviewScreen(
-            session: session,
-            repository: repository,
-            controller: _controller,
-          ),
-        ),
+        entry: session.entry,
+        controller: _controller,
+        repository: repository,
       );
     } catch (error) {
       if (mounted) {
@@ -647,7 +812,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
     return Scaffold(
       appBar: AppBar(
         toolbarHeight: 36,
-        title: const Text('Live'),
+        title: Text(widget.guided ? 'Desired State' : 'Session'),
         actions: [
           IconButton(
             tooltip: 'Device connection',
@@ -661,7 +826,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
               onPressed: _openSessionNotes,
             ),
           IconButton(
-            tooltip: 'Live settings',
+            tooltip: 'Session settings',
             icon: const Icon(Icons.tune),
             onPressed: () => Navigator.push(
               context,
@@ -695,7 +860,10 @@ class _CollectorScreenState extends State<CollectorScreen> {
   Widget _buildConnect(BuildContext context) => ListView(
     padding: const EdgeInsets.all(20),
     children: [
-      Text('Desired State', style: Theme.of(context).textTheme.headlineSmall),
+      Text(
+        widget.guided ? 'Desired State' : 'Session',
+        style: Theme.of(context).textTheme.headlineSmall,
+      ),
       const SizedBox(height: 12),
       OutlinedButton.icon(
         onPressed: _openHistory,
@@ -727,6 +895,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
       TextField(
         controller: _participantNameController,
         onChanged: (_) {
+          _participantDefaultEdited = true;
           _controller.participantInfo = '';
           _controller.participantId = null;
         },
@@ -741,11 +910,13 @@ class _CollectorScreenState extends State<CollectorScreen> {
         label: const Text('Choose / edit participant'),
       ),
       const SizedBox(height: 12),
-      OutlinedButton.icon(
-        onPressed: _controller.busy ? null : _setupSession,
-        icon: const Icon(Icons.assignment_outlined),
-        label: const Text('Session setup / starting rating'),
-      ),
+      if (!widget.guided) _recordingTypePicker(),
+      if (widget.guided)
+        OutlinedButton.icon(
+          onPressed: _controller.busy ? null : _setupSession,
+          icon: const Icon(Icons.assignment_outlined),
+          label: const Text('Session setup / starting rating'),
+        ),
       if (_connected) ...[
         _deviceLine(),
         const SizedBox(height: 20),
@@ -835,7 +1006,9 @@ class _CollectorScreenState extends State<CollectorScreen> {
         Align(
           alignment: Alignment.centerLeft,
           child: TextButton.icon(
-            onPressed: _controller.busy ? null : () => _rateSession('during'),
+            onPressed: _controller.busy || _controller.sessionLogger == null
+                ? null
+                : () => _rateSession('during'),
             icon: const Icon(Icons.sentiment_satisfied_alt),
             label: const Text('How do I feel?'),
           ),
@@ -886,16 +1059,17 @@ class _CollectorScreenState extends State<CollectorScreen> {
           icon: const Icon(Icons.sentiment_satisfied_alt),
           label: const Text('Optional ending rating'),
         ),
-        TextButton(
-          onPressed: _setupSession,
-          child: const Text('Setup next session'),
-        ),
+        if (widget.guided)
+          TextButton(
+            onPressed: _setupSession,
+            child: const Text('Setup next session'),
+          ),
         FilledButton.icon(
           onPressed: _controller.busy ? null : _reviewLastSession,
           icon: const Icon(Icons.analytics_outlined),
-          label: const Text('Review session'),
+          label: const Text('Analyze session'),
         ),
-        QuickMarkerBar(controller: _controller),
+        QuickMarkerBar(controller: _controller, compact: true),
         const SizedBox(height: 8),
         Text(
           '${_timeline.length} updates · ${_eventTimes.length} events · ${_rrHistory.artifactCount} artifacts',

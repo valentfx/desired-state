@@ -58,7 +58,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(home: CollectorScreen(controller: controller)),
       );
-      await tester.tap(find.byTooltip('Live settings'));
+      await tester.tap(find.byTooltip('Session settings'));
       await settleIo(
         tester,
         () => find.text('Processing & plots').evaluate().isNotEmpty,

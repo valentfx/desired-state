@@ -15,6 +15,19 @@ DesktopCursorValue inspectDesktopSignal(
   if (points.isEmpty) {
     return const DesktopCursorValue('No data');
   }
+  if (name == 'Sleep position (recorded estimate)') {
+    SignalPoint? state;
+    for (final point in points) {
+      if (point.$1 <= cursor) state = point;
+    }
+    return state == null
+        ? const DesktopCursorValue('No data')
+        : DesktopCursorValue(
+            'Recorded estimate',
+            value: state.$2,
+            sampleTime: state.$1,
+          );
+  }
   final tolerance =
       name.startsWith('ECG') ||
           name.startsWith('Muse channel') ||
@@ -41,6 +54,8 @@ DesktopCursorValue inspectDesktopSignal(
 }
 
 List<String> desktopSignalNames(DesktopIndex index) => [
+  if (index.overview.containsKey('Sleep position (recorded estimate)'))
+    'Sleep position (recorded estimate)',
   if (index.rows.containsKey('measurements')) 'BPM',
   if (index.rows.containsKey('rr')) ...[
     'RR (ms, raw)',
@@ -49,6 +64,7 @@ List<String> desktopSignalNames(DesktopIndex index) => [
   if (index.rows.containsKey('o2ring_measurements')) ...[
     'SpO2 (%)',
     'Ring pulse (bpm)',
+    'Ring movement (raw)',
   ],
   if (index.rows.containsKey('muse_bands')) ...[
     for (final band in ['Delta', 'Theta', 'Alpha', 'Beta']) 'EEG $band (µV²)',
@@ -58,6 +74,7 @@ List<String> desktopSignalNames(DesktopIndex index) => [
   ],
   if (index.rows.containsKey('h10_ecg')) 'ECG (µV)',
   if (index.rows.containsKey('h10_accelerometer')) ...[
+    'H10 movement (mean sample delta, mG)',
     for (final axis in ['X', 'Y', 'Z']) 'H10 $axis (mG)',
   ],
 ];

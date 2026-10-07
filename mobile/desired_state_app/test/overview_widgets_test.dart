@@ -155,7 +155,7 @@ void main() {
     );
     expect(find.byType(NavigationRail), findsNothing);
     expect(find.byType(NavigationBar), findsNothing);
-    await openScreen(tester, 'Live');
+    await openScreen(tester, 'Session');
     await tester.pumpAndSettle();
     await tester.enterText(
       find.widgetWithText(TextField, 'Participant name'),
@@ -175,7 +175,7 @@ void main() {
       () => find.byType(CircularProgressIndicator).evaluate().isEmpty,
     );
     expect(find.text('Overview'), findsOneWidget);
-    await openScreen(tester, 'Live');
+    await openScreen(tester, 'Session');
     await tester.pumpAndSettle();
     expect(find.text('Draft participant'), findsOneWidget);
     expect(controller.participant, 'unassigned');

@@ -1,4 +1,8 @@
 import 'dart:convert';
+
+import 'participant_store.dart';
+import 'recording_types.dart';
+
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
@@ -87,9 +91,94 @@ Future<List<String>> syncDesktopPhone(
   await root.create(recursive: true);
   final catalogFile = File('${root.parent.path}/catalog.json');
   final catalog = await readDesktopCatalog(catalogFile);
+  // The phone is the participant-directory master. Publish only a validated,
+  // stable copy, independently of session files and their annotation conflicts.
+  final profileNames = safeNames(await command(['ls', '-1', 'app_flutter']));
+  if (profileNames.contains('participants_v1.jsonl')) {
+    final profileStage = await root.parent.createTemp('.participant-sync-');
+    try {
+      const remoteProfile = 'app_flutter/participants_v1.jsonl';
+      final before = (await command(['sha256sum', remoteProfile]))
+          .trim()
+          .split(RegExp(r'\s+'))
+          .first;
+      final text = await command(['cat', remoteProfile]);
+      if ('${sha256.convert(utf8.encode(text))}' != before ||
+          !(await command(['sha256sum', remoteProfile])).startsWith(before)) {
+        throw StateError('Phone profiles changed during sync; retry');
+      }
+      await File('${profileStage.path}/participants_v1.jsonl')
+          .writeAsString(text, flush: true);
+      await ParticipantStore(directoryProvider: () async => profileStage)
+          .profiles();
+      final target = File('${root.parent.path}/participants_v1.jsonl');
+      final previous = File('${target.path}.previous');
+      if (await previous.exists()) await previous.delete();
+      if (await target.exists()) await target.rename(previous.path);
+      try {
+        await File('${profileStage.path}/participants_v1.jsonl')
+            .rename(target.path);
+      } catch (_) {
+        if (await previous.exists()) await previous.rename(target.path);
+        rethrow;
+      }
+    } finally {
+      if (await profileStage.exists()) {
+        await profileStage.delete(recursive: true);
+      }
+    }
+  }
+  // Recording definitions use the same phone-master validated publication rule.
+  if (profileNames.contains('recording_types.jsonl')) {
+    final typeStage = await root.parent.createTemp('.recording-type-sync-');
+    try {
+      const remoteTypes = 'app_flutter/recording_types.jsonl';
+      final before = (await command(['sha256sum', remoteTypes]))
+          .trim()
+          .split(RegExp(r'\s+'))
+          .first;
+      final text = await command(['cat', remoteTypes]);
+      if ('${sha256.convert(utf8.encode(text))}' != before ||
+          !(await command(['sha256sum', remoteTypes])).startsWith(before)) {
+        throw StateError('Phone recording types changed during sync; retry');
+      }
+      await File('${typeStage.path}/recording_types.jsonl')
+          .writeAsString(text, flush: true);
+      await RecordingTypeStore(directoryProvider: () async => typeStage).list();
+      final target = File('${root.parent.path}/recording_types.jsonl');
+      final previous = File('${target.path}.previous');
+      if (await previous.exists()) {
+        await previous.delete();
+      }
+      if (await target.exists()) {
+        await target.rename(previous.path);
+      }
+      try {
+        await File('${typeStage.path}/recording_types.jsonl')
+            .rename(target.path);
+      } catch (_) {
+        if (await previous.exists()) {
+          await previous.rename(target.path);
+        }
+        rethrow;
+      }
+    } finally {
+      if (await typeStage.exists()) {
+        await typeStage.delete(recursive: true);
+      }
+    }
+  }
+  final deletedFile = File('${root.parent.path}/deleted_sessions.json');
+  final deleted = await deletedFile.exists()
+      ? jsonDecode(await deletedFile.readAsString()) as Map
+      : <String, dynamic>{};
   final results = <String>[];
   for (final id in sessions) {
     if (!RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(id)) {
+      continue;
+    }
+    if (deleted.containsKey(id)) {
+      results.add('$id: locally deleted; phone copy skipped');
       continue;
     }
     final remote = '$base/$id';
@@ -121,6 +210,29 @@ Future<List<String>> syncDesktopPhone(
       }
       final destination = Directory('$rootPath/$id');
       var unchanged = await destination.exists();
+      var localAnnotations = false;
+      if (unchanged) {
+        for (final annotation in [
+          'history_edits.jsonl',
+          'state_feedback.jsonl',
+        ]) {
+          final journal = File('${destination.path}/$annotation');
+          final prior = (catalog['sessions'] as Map)[id];
+          final known = prior is Map && prior['files_sha256'] is Map
+              ? (prior['files_sha256'] as Map)[annotation]
+              : null;
+          if (await journal.exists()) {
+            final localHash = '${await sha256.bind(journal.openRead()).first}';
+            if (localHash != known && localHash != hashes[annotation]) {
+              results.add(
+                '$id: desktop annotations retained; phone replacement skipped pending annotation reconciliation',
+              );
+              localAnnotations = true;
+            }
+          }
+        }
+      }
+      if (localAnnotations) continue;
       if (unchanged) {
         final localNames = <String>[];
         await for (final entity in destination.list(followLinks: false)) {

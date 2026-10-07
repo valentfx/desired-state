@@ -11,15 +11,22 @@ enum FeedbackQuestion {
     'Fully there',
   ),
   anxiety('anxiety', 'How anxious do you feel?', 'None', 'Extreme'),
-  energy('energy', 'How much energy do you feel?', 'None', 'Very high');
+  energy('energy', 'How much energy do you feel?', 'None', 'Very high'),
+  overall(
+    'overall_feeling',
+    'How do I feel overall?',
+    'Very poor',
+    'Excellent',
+  );
 
   const FeedbackQuestion(this.id, this.label, this.low, this.high);
   final String id, label, low, high;
+  int get minimum => this == FeedbackQuestion.overall ? 1 : 0;
   Map<String, dynamic> toJson() => {
     'id': id,
     'version': 1,
     'text': label,
-    'minimum': 0,
+    'minimum': minimum,
     'maximum': 10,
     'low_label': low,
     'high_label': high,
@@ -32,13 +39,19 @@ class SessionContext {
     this.type = 'monitoring',
     this.desiredState = '',
     this.question = FeedbackQuestion.goal,
+    this.experience = 'desired_state',
+    this.recordingType,
   });
   final String purpose, type, desiredState;
+  final String experience;
+  final Map<String, dynamic>? recordingType;
   final FeedbackQuestion question;
   Map<String, dynamic> toJson() => {
     'schema_version': 1,
     'purpose': purpose,
     'session_type': type,
+    'experience': experience,
+    'recording_type': recordingType,
     'desired_state': desiredState.trim().isEmpty ? null : desiredState.trim(),
     'rating_question': question.toJson(),
   };
@@ -78,6 +91,13 @@ class StateFeedbackStore {
           'Unsupported or corrupt feedback journal; original preserved',
         );
       }
+      final definition = row['question'] as Map;
+      if (definition['id'] == FeedbackQuestion.overall.id &&
+          (definition['minimum'] != 1 ||
+              definition['maximum'] != 10 ||
+              (row['value'] as int) < 1)) {
+        throw const FormatException('Invalid overall feeling scale');
+      }
       rows.add(row);
     }
     return rows;
@@ -93,7 +113,7 @@ class StateFeedbackStore {
     DateTime? eventAt,
     DateTime? enteredAt,
   }) async {
-    if (value < 0 ||
+    if (value < question.minimum ||
         value > 10 ||
         !const ['pre', 'during', 'post', 'followup'].contains(phase)) {
       throw ArgumentError('Invalid state rating');
