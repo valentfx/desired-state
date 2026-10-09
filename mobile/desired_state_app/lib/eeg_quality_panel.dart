@@ -53,7 +53,7 @@ class EegQualityPanel extends StatelessWidget {
           const Padding(
             padding: EdgeInsets.all(12),
             child: Text(
-              'Adjust the headband gently, stay still and wait a few seconds. Large changes can be movement or poor contact. This checks sample artifacts, not electrode impedance. Band-share plots require every channel to pass; failed windows remain saved as raw EEG when EEG recording is enabled.',
+              'Adjust the headband gently, stay still and wait a few seconds. Large changes can be movement or poor contact. This checks sample artifacts, not electrode impedance. Screening is optional and off by default. Failed windows remain visible in unscreened plots and saved as raw EEG when recording is enabled.',
             ),
           ),
         ],

@@ -3,7 +3,7 @@
   "processing_version": "rr-configurable-v2",
   "purpose": "derived_view_only",
   "recorded_flags_processing": "mobile-median9-25pct-300-2000-v1",
-  "mode": "screened",
+  "mode": "raw",
   "minimum_ms": 300,
   "maximum_ms": 2000,
   "deviation_percent": 25,

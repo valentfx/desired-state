@@ -112,13 +112,14 @@ void main() {
           painter.series.keys,
           containsAll(['Delta', 'Theta', 'Alpha', 'Beta']),
         );
-        expect(painter.maximum, 100);
-        expect(painter.yLabel, '%');
+        expect(painter.maximum, greaterThan(10));
+        expect(painter.yLabel, 'dB');
         expect(painter.showPoints, isFalse);
         expect(painter.events, [59.0]);
-        expect(painter.series['Delta']!.first.$2, 40);
-        expect(painter.series.values.every((p) => p.last.$2.isNaN), isTrue);
-        expect(find.text('EEG · poor or stale signal'), findsOneWidget);
+        expect(painter.series['Delta']!.first.$2, closeTo(16.0206, .001));
+        expect(painter.series['Alpha']!.last.$2.isFinite, isTrue);
+        expect(painter.series['Gamma']!.last.$2.isNaN, isTrue);
+        expect(find.textContaining('EEG powerbands'), findsOneWidget);
         expect(tester.takeException(), isNull);
       } finally {
         await tester.pumpWidget(const SizedBox());

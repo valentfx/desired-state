@@ -279,21 +279,45 @@ void main() {
       await tester.tap(find.text('EEG post-processing'));
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
-        find.text('EEG band power'),
+        find.byType(EegComparisonPlot),
         180,
         scrollable: find.byType(Scrollable).first,
       );
+      expect(find.text('No EEG screening'), findsOneWidget);
+      expect(
+        tester
+            .widgetList<CustomPaint>(find.byType(CustomPaint))
+            .map((w) => w.painter)
+            .whereType<EegAxisPainter>()
+            .any((p) => p.yLabel == 'EEG dB re 1 µV²'),
+        isTrue,
+      );
+      final units = find.widgetWithText(ChoiceChip, 'µV²');
+      await tester.ensureVisible(units);
+      await tester.pump();
+      await tester.tap(units.hitTestable());
+      await tester.pumpAndSettle();
       final painters = tester
           .widgetList<CustomPaint>(find.byType(CustomPaint))
           .map((w) => w.painter)
           .whereType<EegAxisPainter>();
       expect(
         painters.any(
-          (p) =>
-              p.yLabel == 'EEG band power (µV²)' &&
-              p.minimum == 0 &&
-              p.maximum > 50,
+          (p) => p.yLabel == 'EEG (µV²)' && p.minimum == 0 && p.maximum > 50,
         ),
+        isTrue,
+      );
+      final comparison = find.widgetWithText(FilterChip, 'Overlay comparison');
+      await tester.ensureVisible(comparison);
+      await tester.pump();
+      await tester.tap(comparison.hitTestable());
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widgetList<CustomPaint>(find.byType(CustomPaint))
+            .map((w) => w.painter)
+            .whereType<EegAxisPainter>()
+            .any((p) => p.dashedSeries.isNotEmpty),
         isTrue,
       );
       expect(tester.takeException(), isNull);

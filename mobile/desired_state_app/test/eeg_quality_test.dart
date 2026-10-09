@@ -20,7 +20,7 @@ void main() {
     for (final samples in cases) {
       expect(
         assessEegWindow(samples, 256).usable,
-        eegBandPower(samples, 256) != null,
+        eegBandPower(samples, 256, artifactScreening: true) != null,
       );
     }
     expect(assessEegWindow(clean, 256).usable, isTrue);

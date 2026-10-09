@@ -31,7 +31,7 @@ void main() {
       final store = ProcessingPresets(directoryProvider: () async => root);
       final defaults = await loadDefaultProcessing();
       expect(defaults.metrics, ['HR', 'RMSSD']);
-      expect(defaults.mode, AnalysisMode.screened);
+      expect(defaults.mode, AnalysisMode.raw);
       final custom = ProcessingPreset('My settings', defaults);
       expect(
         ProcessingPreset.decode(custom.encode()).config.toJson(),
@@ -117,7 +117,7 @@ void main() {
                   find.byType(DropdownButton<AnalysisMode>),
                 )
                 .value ==
-            AnalysisMode.screened,
+            AnalysisMode.raw,
       );
       expect(result, isNull);
       expect(
@@ -126,7 +126,7 @@ void main() {
               find.byType(DropdownButton<AnalysisMode>),
             )
             .value,
-        AnalysisMode.screened,
+        AnalysisMode.raw,
       );
       await tester.tap(find.text('Save preset'));
       await tester.pumpAndSettle();
@@ -149,7 +149,7 @@ void main() {
       await settleIo(tester, () => find.byType(BottomSheet).evaluate().isEmpty);
       await tester.tap(find.text('Apply & save'));
       await tester.pumpAndSettle();
-      expect(result!.mode, AnalysisMode.screened);
+      expect(result!.mode, AnalysisMode.raw);
       expect(result!.metrics, ['HR', 'RMSSD']);
       expect(result!.reference, 9);
       expect(tester.takeException(), isNull);

@@ -48,7 +48,7 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
     setState(() => _saving = true);
     try {
       await widget.controller.savePreferences(
-        SessionPreferences(
+        widget.controller.preferences.copyWith(
           recording: _recording,
           showEeg: _eeg,
           showOxygen: _oxygen,

@@ -39,9 +39,9 @@ class _SessionReviewScreenState extends State<SessionReviewScreen> {
   late RangeValues _range = RangeValues(0, _duration);
   late RangeValues _baseline = RangeValues(0, math.min(60.0, _duration));
   int _hrvSeconds = 60, _eegSeconds = 4;
-  bool _relative = false, _saving = false;
+  bool _relative = false, _saving = false, _eegScreening = false;
   String? _channel, _notice;
-  double? _locked;
+  String _eegUnits = 'dB';
   double _replayStart = 0;
   late List<HrvBlock> _blocks = hrvBlocks(widget.session, _hrvSeconds);
   late Future<SignalReview> _signals = _loadSignals();
@@ -217,13 +217,23 @@ class _SessionReviewScreenState extends State<SessionReviewScreen> {
               !b.frame.time.isBefore(_time(_baseline.start)) &&
               !b.frame.time.isAfter(_time(_baseline.end)),
         )
-        .map((b) => b.frame.values(channel, relative: _relative))
+        .map(
+          (b) => b.frame.values(
+            channel,
+            relative: _relative,
+            artifactScreening: _eegScreening,
+          ),
+        )
         .where((v) => v.isNotEmpty)
         .toList();
     return {
       if (frames.isNotEmpty)
-        for (final name in eegBands.keys)
-          name: frames.fold<double>(0, (s, v) => s + v[name]!) / frames.length,
+        for (final name in eegBands.keys.where(
+          (name) => frames.every((f) => f.containsKey(name)),
+        ))
+          name:
+              frames.fold<double>(0, (s, v) => s + (v[name] ?? 0)) /
+              frames.length,
     };
   }
 
@@ -238,7 +248,13 @@ class _SessionReviewScreenState extends State<SessionReviewScreen> {
               !b.frame.time.isBefore(cutoff) &&
               !b.frame.time.isAfter(_time(_range.end)),
         )
-        .map((b) => b.frame.values(channel, relative: _relative))
+        .map(
+          (b) => b.frame.values(
+            channel,
+            relative: _relative,
+            artifactScreening: _eegScreening,
+          ),
+        )
         .where((v) => v.isNotEmpty)
         .toList();
     if (baseline.isEmpty ||
@@ -250,7 +266,7 @@ class _SessionReviewScreenState extends State<SessionReviewScreen> {
     }
     return [
       for (final name in ['Alpha', 'Theta', 'Beta'])
-        'Mean $name: baseline ${baseline[name]!.toStringAsFixed(2)}, final usable windows ${(recent.fold<double>(0, (s, v) => s + v[name]!) / recent.length).toStringAsFixed(2)} ${_relative ? '%' : 'µV²'} (${recent.length} windows in the final 20 seconds of this view). Changing channel availability and eye/muscle artifacts may influence this comparison.',
+        'Mean $name: baseline ${baseline[name]!.toStringAsFixed(2)}, final usable windows ${(recent.fold<double>(0, (s, v) => s + (v[name] ?? 0)) / recent.length).toStringAsFixed(2)} ${_relative ? '%' : 'µV²'} (${recent.length} windows in the final 20 seconds of this view). Changing channel availability and eye/muscle artifacts may influence this comparison.',
     ];
   }
 
@@ -277,7 +293,11 @@ class _SessionReviewScreenState extends State<SessionReviewScreen> {
           'rr_duration_estimate_fraction_bounds': [.8, 1.2],
         },
         'eeg_settings': {
-          'method': 'hann_periodogram_1_30hz_v1',
+          'method': 'hann_periodogram_0_5_100hz_v2',
+          'artifact_screening': _eegScreening,
+          'display_units': _eegUnits == 'dB'
+              ? 'dB_re_1_microvolt_squared'
+              : _eegUnits,
           'window_seconds': _eegSeconds,
           'channel':
               signals != null &&
@@ -537,22 +557,6 @@ class _SessionReviewScreenState extends State<SessionReviewScreen> {
                           _signals = _loadSignals();
                         }),
                       ),
-                    ChoiceChip(
-                      label: const Text('Absolute µV²'),
-                      selected: !_relative,
-                      onSelected: (_) => setState(() {
-                        _relative = false;
-                        _locked = null;
-                      }),
-                    ),
-                    ChoiceChip(
-                      label: const Text('Relative %'),
-                      selected: _relative,
-                      onSelected: (_) => setState(() {
-                        _relative = true;
-                        _locked = null;
-                      }),
-                    ),
                   ],
                 ),
                 if (signals != null) _eegContent(signals),
@@ -666,92 +670,23 @@ class _SessionReviewScreenState extends State<SessionReviewScreen> {
       },
     ),
   );
-  Widget _eegContent(SignalReview signals) {
-    final channels =
-        signals.bands.expand((b) => b.frame.channels.keys).toSet().toList()
-          ..sort();
-    final effectiveChannel = channels.contains(_channel) ? _channel : null;
-    final series = <String, List<(double, double)>>{
-      for (final band in eegBands.keys) band: [],
-    };
-    int? previousSegment;
-    for (final b in signals.bands) {
-      final t = b.frame.time.difference(_origin).inMicroseconds / 1000000;
-      if (t < _range.start || t > _range.end) {
-        continue;
-      }
-      final values = b.frame.values(effectiveChannel, relative: _relative);
-      for (final band in series.keys) {
-        if (previousSegment != null && previousSegment != b.segment) {
-          series[band]!.add((t, double.nan));
-        }
-        series[band]!.add((t, values[band] ?? double.nan));
-      }
-      previousSegment = b.segment;
-    }
-    final reference = _reference(signals);
-    final maxPower =
-        [
-          ...series.values
-              .expand((p) => p)
-              .map((p) => p.$2)
-              .where((v) => v.isFinite),
-          ...reference.values,
-        ].fold<double>(1, math.max) *
-        1.1;
-    final maximum = _relative ? 100.0 : _locked ?? maxPower;
-    return Column(
-      children: [
-        Text(
-          '${signals.usableWindows}/${signals.windows} EEG windows have at least one provisionally usable channel. Channel availability can change over time.',
-        ),
-        DropdownButton<String>(
-          value: effectiveChannel ?? '',
-          isExpanded: true,
-          items: [
-            const DropdownMenuItem(
-              value: '',
-              child: Text('Mean of usable channels'),
-            ),
-            for (final name in channels)
-              DropdownMenuItem(value: name, child: Text(name)),
-          ],
-          onChanged: (v) => setState(() => _channel = v == '' ? null : v),
-        ),
-        _plot(
-          'EEG band power',
-          series,
-          _relative ? '%' : 'µV²',
-          minimum: 0,
-          maximum: maximum,
-          references: reference,
-        ),
-        if (!_relative)
-          TextButton(
-            onPressed: () =>
-                setState(() => _locked = _locked == null ? maximum : null),
-            child: Text(
-              _locked == null ? 'Lock shared scale' : 'Auto shared scale',
-            ),
-          ),
-        Wrap(
-          spacing: 12,
-          children: [
-            for (final entry in reference.entries)
-              Text(
-                'Baseline ${entry.key}: ${entry.value.toStringAsFixed(2)} ${_relative ? '%' : 'µV²'}',
-              ),
-          ],
-        ),
-        for (final observation in _eegObservations(signals))
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            child: Text(observation),
-          ),
-        const Text(
-          'All bands share zero and one scale. Dashed lines are the selected baseline. Bands are recomputed from raw saved samples with continuity resets; no relaxation/sleep classification.',
-        ),
-      ],
-    );
-  }
+  Widget _eegContent(SignalReview signals) => EegComparisonPlot(
+    frames: signals.bands.map((b) => b.frame).toList(),
+    origin: _origin,
+    left: _range.start,
+    right: _range.end,
+    screening: _eegScreening,
+    onScreeningChanged: (v) => setState(() => _eegScreening = v),
+    onUnitsChanged: (v) => setState(() {
+      _eegUnits = v;
+      _relative = v == '%';
+    }),
+    onChannelChanged: (v) => setState(() => _channel = v),
+    events: widget.session.entry.events
+        .where((e) => e['event'] == 'marked_event')
+        .map((e) => DateTime.tryParse('${e['received_utc']}'))
+        .whereType<DateTime>()
+        .map((t) => t.difference(_origin).inMicroseconds / 1000000)
+        .toList(),
+  );
 }

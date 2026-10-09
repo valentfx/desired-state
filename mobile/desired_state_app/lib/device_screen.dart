@@ -6,6 +6,7 @@ import 'session_controller.dart';
 import 'o2_ring_service.dart';
 import 'o2_ring_diagnostics_screen.dart';
 import 'device_detail_screen.dart';
+import 'bluetooth_permissions.dart';
 
 /// Device discovery lives here; acquisition remains owned by SessionController.
 class DeviceScreen extends StatefulWidget {
@@ -177,7 +178,11 @@ class _DeviceScreenState extends State<DeviceScreen> {
       _controller.museAthena.reportStatus('Nearby devices permission denied');
       return;
     }
-    await _controller.museAthena.connect(serialNumber: _athenaSerial.text);
+    await _controller.loadUserSettings();
+    await _controller.museAthena.connect(
+      serialNumber: _athenaSerial.text,
+      optical: _controller.preferences.museOpticalCapture,
+    );
   }
 
   Widget _athenaCard() => Card(
@@ -196,6 +201,37 @@ class _DeviceScreenState extends State<DeviceScreen> {
               ),
               const Text(
                 'EEG and motion · included when recording. Detailed diagnostics below.',
+              ),
+              SwitchListTile(
+                title: const Text('Capture Athena optical data (experimental)'),
+                subtitle: const Text(
+                  'Raw intensity, not a brain oxygenation score. Reconnect to change.',
+                ),
+                value: _controller.preferences.museOpticalCapture,
+                onChanged: muse.streaming || muse.busy
+                    ? null
+                    : (v) async {
+                        try {
+                          await _controller.savePreferences(
+                            _controller.preferences.copyWith(
+                              museOpticalCapture: v,
+                            ),
+                          );
+                          if (mounted) {
+                            setState(() {});
+                          }
+                        } catch (error) {
+                          if (mounted && context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Optical setting not saved: $error',
+                                ),
+                              ),
+                            );
+                          }
+                        }
+                      },
               ),
               const SizedBox(height: 8),
               TextField(
@@ -268,18 +304,7 @@ class _DeviceScreenState extends State<DeviceScreen> {
       ),
     ),
   );
-  Future<bool> _requestPermissions() async {
-    final results = await [
-      Permission.bluetoothScan,
-      Permission.bluetoothConnect,
-      Permission.notification,
-    ].request();
-
-    final scanOk = results[Permission.bluetoothScan]?.isGranted ?? false;
-    final connectOk = results[Permission.bluetoothConnect]?.isGranted ?? false;
-
-    return scanOk && connectOk;
-  }
+  Future<bool> _requestPermissions() => requestDeviceBluetoothPermissions();
 
   Future<void> _scan(String kind) async {
     if (_scanning) {

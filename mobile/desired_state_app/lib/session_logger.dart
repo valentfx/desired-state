@@ -290,7 +290,8 @@ class SessionLogger {
       'user_id': participantName,
       'device_id': 'MUSE_ATHENA',
       'units': 'microvolt_squared',
-      'method': 'hann_periodogram_1_30hz_v1',
+      'method': 'hann_periodogram_0_5_100hz_v2',
+      'processing_version': 2,
     }),
   );
 

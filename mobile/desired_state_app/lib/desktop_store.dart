@@ -273,7 +273,7 @@ class DesktopDecoder {
       final channels = (row['channels'] as Map).values
           .whereType<Map>()
           .toList();
-      for (final band in ['Delta', 'Theta', 'Alpha', 'Beta']) {
+      for (final band in ['Delta', 'Theta', 'Alpha', 'Beta', 'Gamma']) {
         final values = channels
             .map((v) => v[band])
             .whereType<num>()
@@ -282,9 +282,7 @@ class DesktopDecoder {
         add(
           'EEG $band (µV²)',
           t,
-          channels.length == row['total_channels'] &&
-                  values.length == channels.length &&
-                  values.isNotEmpty
+          values.length == channels.length && values.isNotEmpty
               ? values.fold<double>(0, (a, b) => a + b) / values.length
               : double.nan,
           5,
@@ -340,6 +338,18 @@ class DesktopDecoder {
           xyz.map((v) => (v as List)[axis]).toList(),
           (row['sample_rate_hz'] as num?)?.toDouble() ?? 50,
         );
+      }
+    }
+    if (name == 'muse_eeg' && row['optical'] is Map) {
+      for (final entry in (row['optical'] as Map).entries) {
+        if (entry.value is List &&
+            (entry.value as List).whereType<num>().any((v) => v != 0)) {
+          samples(
+            'Athena optical ${entry.key} (raw intensity)',
+            entry.value,
+            (row['optical_rate_hz'] as num?)?.toDouble() ?? 64,
+          );
+        }
       }
     }
     if (name == 'muse_eeg' && row['eeg'] is Map) {

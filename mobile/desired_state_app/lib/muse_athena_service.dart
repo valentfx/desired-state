@@ -40,7 +40,9 @@ class MuseAthenaService extends ChangeNotifier {
       DateTime.now().difference(lastSamplesAt!) < const Duration(seconds: 3);
   bool _disposed = false;
   void _notify() {
-    if (!_disposed) notifyListeners();
+    if (!_disposed) {
+      notifyListeners();
+    }
   }
 
   bool streaming = false;
@@ -49,6 +51,13 @@ class MuseAthenaService extends ChangeNotifier {
   String deviceHint = '';
   int eegRate = 0;
   int motionRate = 0;
+  int opticalRate = 0;
+  int opticalSamples = 0;
+  String acquisitionPreset = 'p21';
+  DateTime? lastOpticalAt;
+  final Map<String, List<double>> opticalHistory = {};
+  double? batteryRaw;
+
   int eegSamples = 0;
   int motionSamples = 0;
   double? latestEegTimestamp;
@@ -61,8 +70,10 @@ class MuseAthenaService extends ChangeNotifier {
   final Map<String, double> latestGyro = {};
   static const int _historyLimit = 1024;
 
-  Future<void> connect({String serialNumber = ''}) async {
-    if (busy || streaming) return;
+  Future<void> connect({String serialNumber = '', bool optical = false}) async {
+    if (busy || streaming) {
+      return;
+    }
     busy = true;
     status = 'Connecting and starting Athena stream…';
     _clearSamples();
@@ -80,12 +91,14 @@ class MuseAthenaService extends ChangeNotifier {
         'start',
         <String, Object>{
           'serialNumber': serialNumber.trim(),
-          'preset': 'p21',
+          'preset': optical ? 'p1035' : 'p21',
           'lowLatency': true,
         },
       );
       eegRate = (result?['eegRate'] as num?)?.toInt() ?? 0;
       motionRate = (result?['motionRate'] as num?)?.toInt() ?? 0;
+      opticalRate = (result?['opticalRate'] as num?)?.toInt() ?? 0;
+      acquisitionPreset = optical ? 'p1035' : 'p21';
       deviceHint = (result?['deviceHint'] as String?) ?? 'Muse S Athena';
       streaming = true;
       status = 'Connected; waiting for EEG and motion samples';
@@ -99,7 +112,9 @@ class MuseAthenaService extends ChangeNotifier {
   }
 
   Future<void> disconnect() async {
-    if (busy) return;
+    if (busy) {
+      return;
+    }
     busy = true;
     status = 'Stopping Athena stream…';
     _notify();
@@ -121,29 +136,48 @@ class MuseAthenaService extends ChangeNotifier {
   }
 
   void _onEvent(dynamic event) {
-    if (_disposed || event is! Map) return;
+    if (_disposed || event is! Map) {
+      return;
+    }
     final map = Map<Object?, Object?>.from(event);
     if (map['type'] == 'status') {
       status = map['message']?.toString() ?? status;
-      if (status.startsWith('Athena stream read failed:')) streaming = false;
+      if (status.startsWith('Athena stream read failed:')) {
+        streaming = false;
+      }
       _notify();
       return;
     }
     final now = DateTime.now().toUtc();
     final previous = lastSamplesAt;
-    if (previous != null &&
+    if (((map['eegCount'] as num?)?.toInt() ?? 0) > 0 &&
+        previous != null &&
         now.difference(previous) > const Duration(seconds: 2)) {
       continuity++;
       eegHistory.clear();
       accelHistory.clear();
       gyroHistory.clear();
     }
-    if (((map['eegCount'] as num?)?.toInt() ?? 0) > 0) lastSamplesAt = now;
+    if (((map['eegCount'] as num?)?.toInt() ?? 0) > 0) {
+      lastSamplesAt = now;
+    }
     _batches.add({
       ...Map<String, dynamic>.from(event),
       'received_utc': now.toIso8601String(),
       'continuity_segment': continuity,
     });
+    if (lastOpticalAt != null &&
+        now.difference(lastOpticalAt!) > const Duration(seconds: 2)) {
+      opticalHistory.clear();
+    }
+    if (((map['opticalCount'] as num?)?.toInt() ?? 0) > 0) {
+      lastOpticalAt = now;
+      opticalSamples += (map['opticalCount'] as num).toInt();
+      _appendRows(map['optical'], opticalHistory, <String, double>{}, 'OPT');
+    }
+    if (map['batteryRaw'] is num) {
+      batteryRaw = (map['batteryRaw'] as num).toDouble();
+    }
     _appendRows(map['eeg'], eegHistory, latestEeg, 'EEG');
     _appendRows(map['accel'], accelHistory, latestAccel, 'ACC');
     _appendRows(map['gyro'], gyroHistory, latestGyro, 'GYRO');
@@ -159,16 +193,16 @@ class MuseAthenaService extends ChangeNotifier {
         motionTimes.last is num) {
       latestMotionTimestamp = (motionTimes.last as num).toDouble();
     }
-    if (_lastBandAt == null ||
-        now.difference(_lastBandAt!) >= const Duration(seconds: 1)) {
+    if (((map['eegCount'] as num?)?.toInt() ?? 0) > 0 &&
+        (_lastBandAt == null ||
+            now.difference(_lastBandAt!) >= const Duration(seconds: 1))) {
       _lastBandAt = now;
-      final powers = <String, Map<String, double>>{};
-      for (final channel in eegHistory.entries) {
-        final power = eegBandPower(channel.value, eegRate);
-        if (power != null) powers[channel.key] = power;
+      bandHistory.add(
+        buildEegFrame(now, eegHistory, eegRate, segment: continuity),
+      );
+      if (bandHistory.length > 900) {
+        bandHistory.removeAt(0);
       }
-      bandHistory.add(EegBandFrame(now, powers, eegHistory.length));
-      if (bandHistory.length > 900) bandHistory.removeAt(0);
     }
     if (eegSamples > 0 || motionSamples > 0) {
       status = 'Receiving live EEG and motion';
@@ -182,15 +216,20 @@ class MuseAthenaService extends ChangeNotifier {
     Map<String, double> latest,
     String prefix,
   ) {
-    if (source is! Map) return;
+    if (source is! Map) {
+      return;
+    }
     for (final entry in source.entries) {
-      if (entry.value is! List) continue;
+      if (entry.value is! List) {
+        continue;
+      }
       final values = (entry.value as List)
           .whereType<num>()
           .map((value) => value.toDouble())
-          .where((value) => value.isFinite)
           .toList(growable: false);
-      if (values.isEmpty) continue;
+      if (values.isEmpty) {
+        continue;
+      }
       final name = entry.key.toString();
       final points = history.putIfAbsent(name, () => <double>[]);
       points.addAll(values);
@@ -208,7 +247,10 @@ class MuseAthenaService extends ChangeNotifier {
     _lastBandAt = null;
     lastSamplesAt = null;
     bandHistory.clear();
-    eegSamples = motionSamples = 0;
+    eegSamples = motionSamples = opticalSamples = 0;
+    opticalHistory.clear();
+    lastOpticalAt = null;
+    batteryRaw = null;
     latestEegTimestamp = latestMotionTimestamp = null;
     eegHistory.clear();
     accelHistory.clear();

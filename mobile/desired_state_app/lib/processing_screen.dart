@@ -11,6 +11,8 @@ import 'session_controller.dart';
 import 'session_history.dart';
 import 'history_plot.dart';
 import 'metric_sensors_panel.dart';
+import 'eeg_live_panel.dart';
+import 'eeg_saved_screen.dart';
 
 /// One configurable view for live inputs and reopened immutable session rows.
 class ProcessingScreen extends StatefulWidget {
@@ -32,7 +34,7 @@ class ProcessingScreen extends StatefulWidget {
 }
 
 class _ProcessingScreenState extends State<ProcessingScreen> {
-  bool _ready = false, _follow = true, _saving = false;
+  bool _ready = false, _follow = true, _saving = false, _compareRr = false;
   String? _notice;
   String? _error, _configuration, _sessionId;
   RrProcessor? _processor;
@@ -158,16 +160,10 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
   Widget _appliedStatus(ProcessingConfig config) {
     final accepted = _processor?.results.where((r) => r.accepted).length ?? 0;
     final total = _processor?.results.length ?? 0;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(8),
-        child: Text(
-          'Applied RR filter: ${config.mode.name} · $accepted/$total accepted, ${total - accepted} excluded\n'
-          '${config.mode == AnalysisMode.raw ? 'No range/deviation screening' : 'Range ${config.minimum}–${config.maximum} ms'}'
-          '${config.mode == AnalysisMode.screened ? ' · deviation ${config.deviation}% · reference ${config.reference} beats' : ''}'
-          ' · HRV window ${config.windowSeconds}s\n'
-          'Changes apply after Apply & save and recompute this view. Measured BPM, EEG and ECG waveforms stay unchanged.',
-        ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Text(
+        'RR ${config.mode.name} · $accepted/$total accepted · ${config.windowSeconds}s receipt-time window',
       ),
     );
   }
@@ -513,25 +509,6 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                       ),
                   ],
                 ),
-                const Text(
-                  'Visible-range statistics: finite plotted samples; arithmetic average, not time-weighted.',
-                ),
-                for (final metric in config.metrics)
-                  _summary(
-                    metric,
-                    metric == 'HR'
-                        ? hr
-                        : [
-                            for (final r in processor.results)
-                              HistoryPoint(
-                                r.input.time,
-                                r.values[metric],
-                                r.plotSegment,
-                              ),
-                          ],
-                    start,
-                    end,
-                  ),
                 if (!widget.embedded && controller.sessionLogger != null)
                   Text(
                     '${controller.recordingState.name} · ${controller.connectionStatus} · last data ${controller.lastDataAge?.inSeconds ?? '-'}s',
@@ -552,22 +529,58 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                 if (widget.session != null &&
                     widget.session!.warnings.isNotEmpty)
                   Text('Data warnings: ${widget.session!.warnings.join('; ')}'),
-                Text(
-                  '${config.mode.name} · ${ProcessingConfig.version} · ${config.windowSeconds}s receipt-time window',
+                ExpansionTile(
+                  title: const Text('RR processing details'),
+                  children: [
+                    Text(
+                      'Range ${config.minimum}–${config.maximum} ms · deviation ${config.deviation}% · reference ${config.reference} RR',
+                    ),
+                    Text(
+                      'Minimum ${config.minimumSamples} samples / ${config.minimumPairs} pairs / ${config.coverage}% acceptance',
+                    ),
+                    const Text(
+                      'Derived view; originals unchanged. Screening is provisional, not ECG-verified NN.',
+                    ),
+                    if (latest != null)
+                      Text(
+                        '${latest.usable}/${latest.total} usable · ${latest.pairs} pairs · ${latest.missing ?? 'ready'}',
+                      ),
+                    for (final metric in config.metrics)
+                      _summary(
+                        metric,
+                        metric == 'HR'
+                            ? hr
+                            : [
+                                for (final r in processor.results)
+                                  HistoryPoint(
+                                    r.input.time,
+                                    r.values[metric],
+                                    r.plotSegment,
+                                  ),
+                              ],
+                        start,
+                        end,
+                      ),
+                  ],
                 ),
-                Text(
-                  'Bounds ${config.minimum}–${config.maximum} ms · deviation ${config.deviation}% · reference ${config.reference} RR · minimum ${config.minimumSamples} samples / ${config.minimumPairs} pairs / ${config.coverage}% usable RR',
+                FilterChip(
+                  label: const Text('Overlay unscreened RR metrics'),
+                  selected: _compareRr,
+                  onSelected: (v) => setState(() => _compareRr = v),
                 ),
-                const Text(
-                  'Derived view only. Recorded flags stay unchanged. Gaps restart warm-up. Usable percentage is sample acceptance, not time coverage. Screening is provisional, not ECG-verified NN.',
-                ),
-                if (config.mode == AnalysisMode.screened)
-                  Text(
-                    'Reference resets after ${config.reference} consecutive in-range deviations clustered within the threshold; prior rejected RR remain excluded.',
-                  ),
-                if (latest != null)
-                  Text(
-                    'Latest window at ${latest.input.time.toLocal()}: ${latest.usable}/${latest.total} usable · ${latest.pairs} adjacent pairs · ${latest.missing ?? 'metrics available'}',
+                if (widget.session == null)
+                  MetricSensorsPanel(controller: controller),
+                if (widget.session != null)
+                  TextButton.icon(
+                    icon: const Icon(Icons.tune),
+                    label: const Text('EEG filters & comparison'),
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) =>
+                            SavedEegScreen(entry: widget.session!.entry),
+                      ),
+                    ),
                   ),
                 if (inputs.isEmpty)
                   const Text(
@@ -631,33 +644,44 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                     },
                   ),
                 for (final metric in config.metrics) ...[
-                  HistoryPlot(
-                    title: metric,
-                    unit: _unit(metric),
-                    points: metric == 'HR'
-                        ? hr
-                        : [
-                            for (final (i, r) in processor.results.indexed)
-                              HistoryPoint(
-                                r.input.time,
-                                r.values[metric],
-                                r.plotSegment,
-                                sourceIndex: i,
-                              ),
-                          ],
-                    start: start,
-                    end: end,
-                    events: events,
-                    color: _color(metric),
-                    cursor: _selected?.time,
-                    onInspect: (point) => setState(() {
-                      _selected = point;
-                      _metric = metric;
-                      _follow = false;
-                      _left = start;
-                      _right = end;
-                    }),
-                  ),
+                  if (_compareRr && metric != 'HR')
+                    _rrComparison(
+                      metric,
+                      processor,
+                      inputs,
+                      config,
+                      start,
+                      end,
+                      events,
+                    ),
+                  if (!_compareRr || metric == 'HR')
+                    HistoryPlot(
+                      title: metric,
+                      unit: _unit(metric),
+                      points: metric == 'HR'
+                          ? hr
+                          : [
+                              for (final (i, r) in processor.results.indexed)
+                                HistoryPoint(
+                                  r.input.time,
+                                  r.values[metric],
+                                  r.plotSegment,
+                                  sourceIndex: i,
+                                ),
+                            ],
+                      start: start,
+                      end: end,
+                      events: events,
+                      color: _color(metric),
+                      cursor: _selected?.time,
+                      onInspect: (point) => setState(() {
+                        _selected = point;
+                        _metric = metric;
+                        _follow = false;
+                        _left = start;
+                        _right = end;
+                      }),
+                    ),
                   if (_selected != null && _metric == metric)
                     Card(
                       child: Padding(
@@ -754,6 +778,78 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _rrComparison(
+    String metric,
+    RrProcessor current,
+    List<RrInput> inputs,
+    ProcessingConfig config,
+    DateTime start,
+    DateTime end,
+    List<DateTime> events,
+  ) {
+    final raw = RrProcessor(
+      ProcessingConfig.fromJson({...config.toJson(), 'mode': 'raw'}),
+    );
+    for (final input in inputs) {
+      raw.add(input);
+    }
+    List<(double, double)> points(RrProcessor processor) {
+      final result = <(double, double)>[];
+      int? previous;
+      for (final r in processor.results) {
+        if (r.input.time.isBefore(start) || r.input.time.isAfter(end)) {
+          continue;
+        }
+        final t = r.input.time.difference(start).inMicroseconds / 1000000;
+        if (previous != null && previous != r.plotSegment) {
+          result.add((t, double.nan));
+        }
+        result.add((t, r.values[metric] ?? double.nan));
+        previous = r.plotSegment;
+      }
+      return result;
+    }
+
+    final series = {
+      'Unscreened': points(raw),
+      'Applied ${config.mode.name}': points(current),
+    };
+    final finite = series.values
+        .expand((p) => p)
+        .map((p) => p.$2)
+        .where((v) => v.isFinite)
+        .toList();
+    final low = finite.isEmpty ? 0.0 : finite.reduce((a, b) => a < b ? a : b);
+    final high = finite.isEmpty ? 1.0 : finite.reduce((a, b) => a > b ? a : b);
+    final padding = (high - low).abs() * .1 + .1;
+    return Column(
+      children: [
+        Text('$metric · gray: unscreened · color: applied ${config.mode.name}'),
+        SizedBox(
+          height: 180,
+          width: double.infinity,
+          child: CustomPaint(
+            painter: EegAxisPainter(
+              series,
+              left: 0,
+              right: end.difference(start).inMicroseconds / 1000000 + .001,
+              minimum: low - padding,
+              maximum: high + padding,
+              yLabel: '$metric (${_unit(metric)})',
+              colors: {
+                'Unscreened': Colors.grey,
+                'Applied ${config.mode.name}': _color(metric),
+              },
+              events: events
+                  .map((t) => t.difference(start).inMicroseconds / 1000000)
+                  .toList(),
+            ),
+          ),
+        ),
+      ],
     );
   }
 

@@ -18,7 +18,9 @@ DesktopCursorValue inspectDesktopSignal(
   if (name == 'Sleep position (recorded estimate)') {
     SignalPoint? state;
     for (final point in points) {
-      if (point.$1 <= cursor) state = point;
+      if (point.$1 <= cursor) {
+        state = point;
+      }
     }
     return state == null
         ? const DesktopCursorValue('No data')
@@ -67,7 +69,8 @@ List<String> desktopSignalNames(DesktopIndex index) => [
     'Ring movement (raw)',
   ],
   if (index.rows.containsKey('muse_bands')) ...[
-    for (final band in ['Delta', 'Theta', 'Alpha', 'Beta']) 'EEG $band (µV²)',
+    for (final band in ['Delta', 'Theta', 'Alpha', 'Beta', 'Gamma'])
+      'EEG $band (µV²)',
   ],
   if (index.rows.containsKey('muse_eeg')) ...[
     for (final channel in ['1', '2', '3', '4']) 'Muse channel $channel (µV)',

@@ -171,12 +171,18 @@ class TimelineReader {
                 );
               }
               if (name == 'muse_bands' && row['channels'] is Map) {
-                for (final band in ['Delta', 'Theta', 'Alpha', 'Beta']) {
+                for (final band in [
+                  'Delta',
+                  'Theta',
+                  'Alpha',
+                  'Beta',
+                  'Gamma',
+                ]) {
                   final channels = (row['channels'] as Map).values
                       .whereType<Map>()
                       .toList();
                   if (channels.isNotEmpty &&
-                      channels.length == row['total_channels']) {
+                      channels.every((v) => v[band] is num)) {
                     add(
                       'EEG $band (µV²)',
                       seconds,
@@ -216,15 +222,23 @@ class TimelineReader {
                 }
               }
               if (name == 'muse_eeg') {
-                for (final field in ['eeg', 'accel', 'gyro']) {
+                for (final field in ['eeg', 'accel', 'gyro', 'optical']) {
                   if (row[field] is! Map) {
                     continue;
                   }
                   final rate =
-                      (row[field == 'eeg' ? 'eeg_rate_hz' : 'motion_rate_hz']
+                      (row[field == 'eeg'
+                                  ? 'eeg_rate_hz'
+                                  : field == 'optical'
+                                  ? 'optical_rate_hz'
+                                  : 'motion_rate_hz']
                               as num?)
                           ?.toDouble() ??
-                      (field == 'eeg' ? 256 : 52);
+                      (field == 'eeg'
+                          ? 256
+                          : field == 'optical'
+                          ? 64
+                          : 52);
                   for (final entry in (row[field] as Map).entries) {
                     final samples = entry.value as List;
                     for (var i = 0; i < samples.length; i++) {
@@ -533,7 +547,7 @@ class _SessionTimelineScreenState extends State<SessionTimelineScreen> {
         const Padding(
           padding: EdgeInsets.all(12),
           child: Text(
-            'Raw samples retain device timestamps in the files. This view aligns batches by phone receipt time; waveform timing across devices is approximate. EEG bands require all channels to pass screening.',
+            'Raw samples retain device timestamps in the files. This view aligns batches by phone receipt time; waveform timing across devices is approximate. EEG band files keep their recorded processing; Analyze EEG comparison recomputes from raw samples with optional screening.',
           ),
         ),
       ],

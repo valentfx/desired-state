@@ -1,10 +1,15 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+/// Android's foreground service is not an Apple background-recording service.
 class RecordingForegroundService {
   static const _channel = MethodChannel('desired_state/recording_service');
+  bool get _usesAndroidService =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
-  Future<void> start(String sessionId) {
-    return _channel.invokeMethod<void>('start', {
+  Future<void> start(String sessionId) async {
+    if (!_usesAndroidService) return;
+    await _channel.invokeMethod<void>('start', {
       'sessionId': sessionId,
       'state': 'Recording',
     });
@@ -16,8 +21,9 @@ class RecordingForegroundService {
     required double? rmssd,
     required int artifactCount,
     required Duration elapsed,
-  }) {
-    return _channel.invokeMethod<void>('update', {
+  }) async {
+    if (!_usesAndroidService) return;
+    await _channel.invokeMethod<void>('update', {
       'state': state,
       'heartRate': heartRate,
       'rmssd': rmssd,
@@ -27,12 +33,22 @@ class RecordingForegroundService {
   }
 
   Future<void> timerAlert({required bool vibrate}) async {
-    try {
-      await _channel.invokeMethod<void>('timerAlert', {'vibrate': vibrate});
-    } on MissingPluginException {
-      await SystemSound.play(SystemSoundType.alert);
+    if (_usesAndroidService) {
+      try {
+        await _channel.invokeMethod<void>('timerAlert', {'vibrate': vibrate});
+        return;
+      } on MissingPluginException {
+        // A native service may be absent in an isolated development build.
+      }
+    }
+    await SystemSound.play(SystemSoundType.alert);
+    if (vibrate && defaultTargetPlatform == TargetPlatform.iOS) {
+      await HapticFeedback.vibrate();
     }
   }
 
-  Future<void> stop() => _channel.invokeMethod<void>('stop');
+  Future<void> stop() async {
+    if (!_usesAndroidService) return;
+    await _channel.invokeMethod<void>('stop');
+  }
 }

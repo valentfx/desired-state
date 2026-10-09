@@ -94,34 +94,45 @@ void main() {
     rr(930, true, 2);
     expect(data['RMSSD (ms, recorded screening)']!.last.$2.isNaN, true);
   });
-  test('EEG missing channels and oxygen gaps remain unavailable', () {
-    final data = <String, List<SignalPoint>>{};
-    final decoder = DesktopDecoder();
-    decoder.decode(
-      'muse_bands',
-      {
-        'channels': {
-          '1': {'Delta': 100, 'Theta': 20, 'Alpha': 10, 'Beta': 5},
+  test(
+    'available EEG channels remain visible and oxygen gaps remain unavailable',
+    () {
+      final data = <String, List<SignalPoint>>{};
+      final decoder = DesktopDecoder();
+      decoder.decode(
+        'muse_bands',
+        {
+          'channels': {
+            '1': {'Delta': 100, 'Theta': 20, 'Alpha': 10, 'Beta': 5},
+          },
+          'total_channels': 4,
         },
-        'total_channels': 4,
-      },
-      1,
-      data,
-      0,
-      30,
-    );
-    expect(data['EEG Delta (µV²)']!.single.$2.isNaN, true);
-    decoder.decode('o2ring_measurements', {'spo2_percent': 95}, 1, data, 0, 30);
-    decoder.decode(
-      'o2ring_measurements',
-      {'spo2_percent': 96},
-      20,
-      data,
-      0,
-      30,
-    );
-    expect(data['SpO2 (%)']![1].$2.isNaN, true);
-  });
+        1,
+        data,
+        0,
+        30,
+      );
+      expect(data['EEG Delta (µV²)']!.single.$2, 100);
+      expect(data['EEG Gamma (µV²)']!.single.$2.isNaN, true);
+      decoder.decode(
+        'o2ring_measurements',
+        {'spo2_percent': 95},
+        1,
+        data,
+        0,
+        30,
+      );
+      decoder.decode(
+        'o2ring_measurements',
+        {'spo2_percent': 96},
+        20,
+        data,
+        0,
+        30,
+      );
+      expect(data['SpO2 (%)']![1].$2.isNaN, true);
+    },
+  );
   test(
     'indexed waveform window retains original amplitudes in range',
     () async {

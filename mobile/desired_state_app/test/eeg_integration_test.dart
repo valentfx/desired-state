@@ -27,6 +27,20 @@ class FakeMuse extends MuseAthenaService {
     });
   }
 
+  void emitOptical() {
+    data.add({
+      'eegCount': 0,
+      'motionCount': 0,
+      'opticalCount': 3,
+      'eeg': <String, List<double>>{},
+      'optical': {
+        '1': [100.0, 101.0, 102.0],
+      },
+      'opticalTimestamps': [1.0, 1.015625, 1.03125],
+      'received_utc': DateTime.now().toUtc().toIso8601String(),
+    });
+  }
+
   @override
   void dispose() {
     unawaited(data.close());
@@ -36,6 +50,48 @@ class FakeMuse extends MuseAthenaService {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test(
+    'optical batches retain source and timing through pause and export',
+    () async {
+      final root = await Directory.systemTemp.createTemp('optical-recording-');
+      final muse = FakeMuse()
+        ..eegRate = 256
+        ..opticalRate = 64
+        ..acquisitionPreset = 'p1035';
+      final controller = SessionController(
+        service: FakePolar(),
+        museService: muse,
+        foregroundService: FakeForeground(),
+        directoryProvider: () async => root,
+      );
+      try {
+        muse.emit(1);
+        await controller.start(participantName: 'Optical fixture');
+        final logger = controller.sessionLogger!;
+        muse.emitOptical();
+        await logger.flush();
+        final saved = await rows(logger.directory, 'muse_eeg');
+        final optical = saved.last;
+        expect(optical['optical_rate_hz'], 64);
+        expect(optical['acquisition_preset'], 'p1035');
+        expect((optical['optical'] as Map)['1'], [100.0, 101.0, 102.0]);
+        expect(optical['opticalTimestamps'], [1.0, 1.015625, 1.03125]);
+        controller.pause();
+        muse.emitOptical();
+        await logger.flush();
+        expect((await rows(logger.directory, 'muse_eeg')).length, saved.length);
+        await controller.stop();
+        final zip = ZipDecoder().decodeBytes(
+          await (await logger.createExportZip()).readAsBytes(),
+        );
+        expect(zip.files.any((f) => f.name.endsWith('muse_eeg.jsonl')), isTrue);
+      } finally {
+        controller.dispose();
+        await Future<void>.delayed(Duration.zero);
+        await root.delete(recursive: true);
+      }
+    },
+  );
   test('band power retains common physical scale and sinusoid power', () {
     final samples = List.generate(
       1024,
@@ -56,11 +112,14 @@ void main() {
   test(
     'flatline, insufficient samples and large spikes do not yield feedback',
     () {
-      expect(eegBandPower(List.filled(1024, 10), 256), isNull);
+      expect(
+        eegBandPower(List.filled(1024, 10), 256, artifactScreening: true),
+        isNull,
+      );
       expect(eegBandPower(List.filled(100, 1), 256), isNull);
       final samples = List.generate(1024, (i) => math.sin(i.toDouble()));
       samples[500] = 1000;
-      expect(eegBandPower(samples, 256), isNull);
+      expect(eegBandPower(samples, 256, artifactScreening: true), isNull);
     },
   );
   test(

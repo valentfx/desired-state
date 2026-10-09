@@ -13,6 +13,7 @@ import 'backend_upload_screen.dart';
 import 'upload_status.dart';
 import 'desktop_sync.dart';
 import 'desktop_inspection.dart';
+import 'eeg_saved_screen.dart';
 import 'session_history.dart';
 import 'history_screen.dart';
 import 'participant_store.dart';
@@ -69,7 +70,9 @@ class _DesktopScreenState extends State<DesktopScreen> {
       final profiles = await ParticipantStore(
         directoryProvider: () async => Directory(_root!).parent,
       ).profiles();
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       await showDialog<void>(
         context: context,
         builder: (context) => AlertDialog(
@@ -107,13 +110,17 @@ class _DesktopScreenState extends State<DesktopScreen> {
         ),
       );
     } catch (error) {
-      if (mounted) setState(() => _error = '$error');
+      if (mounted) {
+        setState(() => _error = '$error');
+      }
     }
   }
 
   Future<void> _deleteSelected() async {
     final entry = _entry;
-    if (entry == null || _busy || !entry.ended) return;
+    if (entry == null || _busy || !entry.ended) {
+      return;
+    }
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -133,7 +140,9 @@ class _DesktopScreenState extends State<DesktopScreen> {
         ],
       ),
     );
-    if (confirmed != true || !mounted) return;
+    if (confirmed != true || !mounted) {
+      return;
+    }
     setState(() => _busy = true);
     try {
       final repository = SessionHistoryRepository(
@@ -154,15 +163,21 @@ class _DesktopScreenState extends State<DesktopScreen> {
             .showSnackBar(SnackBar(content: Text('Moved to $trash')));
       }
     } catch (error) {
-      if (mounted) setState(() => _error = '$error');
+      if (mounted) {
+        setState(() => _error = '$error');
+      }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() => _busy = false);
+      }
     }
   }
 
   Future<void> _editNotes([String? eventId]) async {
     final entry = _entry;
-    if (_busy || entry == null || !entry.ended || !entry.editsReadable) return;
+    if (_busy || entry == null || !entry.ended || !entry.editsReadable) {
+      return;
+    }
     final repository = SessionHistoryRepository(
       directoryProvider: () async => Directory(_root!).parent,
     );
@@ -176,10 +191,14 @@ class _DesktopScreenState extends State<DesktopScreen> {
         ),
       ),
     );
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
     await _reload();
     final updated = await repository.readEntry(entry.directory);
-    if (mounted) await _open(updated);
+    if (mounted) {
+      await _open(updated);
+    }
   }
 
   void _tapPlot(double time) {
@@ -1069,6 +1088,18 @@ class _DesktopScreenState extends State<DesktopScreen> {
                       },
                 icon: const Icon(Icons.chevron_right),
               ),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.tune),
+                label: const Text('EEG filters & comparison'),
+                onPressed: _entry == null
+                    ? null
+                    : () => Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => SavedEegScreen(entry: _entry!),
+                        ),
+                      ),
+              ),
               FilterChip(
                 label: const Text('Raw ECG / EEG / motion'),
                 selected: _raw,
@@ -1152,7 +1183,7 @@ class _DesktopScreenState extends State<DesktopScreen> {
                       onMarkerTap: _tapPlot,
                     ),
                 const Text(
-                  'Gaps remain gaps. EEG bands require every channel to pass the recorded screen. RMSSD uses recorded acceptance flags and is not ECG-validated. Overview plots preserve extrema through display reduction.',
+                  'Gaps remain gaps. New EEG band files retain unscreened power; use EEG filters & comparison to recompute older raw recordings. RMSSD uses recorded acceptance flags and is not ECG-validated. Overview plots preserve extrema through display reduction.',
                 ),
               ],
             ),
@@ -1203,7 +1234,9 @@ class _DesktopScreenState extends State<DesktopScreen> {
                       ),
                     ),
                   ).then((_) {
-                    if (mounted) unawaited(_reload());
+                    if (mounted) {
+                      unawaited(_reload());
+                    }
                   });
                 },
         ),

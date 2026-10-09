@@ -56,7 +56,9 @@ Stream<Map<String, dynamic>> _rows(
 ) async* {
   final file = File('$directory/$name.jsonl');
   final type = await FileSystemEntity.type(file.path, followLinks: false);
-  if (type == FileSystemEntityType.notFound) return;
+  if (type == FileSystemEntityType.notFound) {
+    return;
+  }
   if (type != FileSystemEntityType.file) {
     warnings.add('$name is not a regular file');
     return;
@@ -68,7 +70,9 @@ Stream<Map<String, dynamic>> _rows(
             .openRead()
             .transform(utf8.decoder)
             .transform(const LineSplitter())) {
-      if (line.trim().isEmpty) continue;
+      if (line.trim().isEmpty) {
+        continue;
+      }
       try {
         final row = jsonDecode(line);
         if (row is Map<String, dynamic>) {
@@ -85,7 +89,9 @@ Stream<Map<String, dynamic>> _rows(
   } catch (_) {
     warnings.add('Unable to read all of $name');
   }
-  if (bad > 0) warnings.add('$name: $bad malformed rows omitted');
+  if (bad > 0) {
+    warnings.add('$name: $bad malformed rows omitted');
+  }
 }
 
 Future<SignalReview> reviewSignals(HistoryEntry entry, {int eegSeconds = 4}) {
@@ -109,13 +115,17 @@ Future<SignalReview> _review(Map<String, dynamic> request) async {
       if (!_belongs(row, request)) {
         throw const FormatException('Identity mismatch');
       }
-      if (row['eegCount'] == 0) continue;
+      if (row['eegCount'] == 0) {
+        continue;
+      }
       final sampleCount = row['eegCount'] as int;
       if (sampleCount < 1 || sampleCount > 10000) {
         throw const FormatException('Invalid sample count');
       }
       final time = DateTime.parse(row['received_utc'] as String);
-      if (endTime == null || time.isAfter(endTime)) endTime = time;
+      if (endTime == null || time.isAfter(endTime)) {
+        endTime = time;
+      }
       final sampleRate = row['eeg_rate_hz'] as int;
       final channels = row['eeg'] as Map;
       if (sampleRate < 64 ||
@@ -148,7 +158,9 @@ Future<SignalReview> _review(Map<String, dynamic> request) async {
         final buffer = buffers.putIfAbsent(name, () => []);
         buffer.addAll(input.map((v) => v.toDouble()));
         final limit = rate * (request['eeg_seconds'] as int);
-        if (buffer.length > limit) buffer.removeRange(0, buffer.length - limit);
+        if (buffer.length > limit) {
+          buffer.removeRange(0, buffer.length - limit);
+        }
       }
       buffers.removeWhere((name, _) => !validChannels.contains(name));
       if (lastPower != null &&
@@ -162,21 +174,19 @@ Future<SignalReview> _review(Map<String, dynamic> request) async {
         continue;
       }
       lastPower = time;
-      final powers = <String, Map<String, double>>{};
-      for (final entry in buffers.entries) {
-        final power = eegBandPower(
-          entry.value,
-          rate,
-          maximumSamples: rate * (request['eeg_seconds'] as int),
-        );
-        if (power != null) powers[entry.key] = power;
-      }
+      final frame = buildEegFrame(
+        time,
+        buffers,
+        rate,
+        maximumSamples: rate * (request['eeg_seconds'] as int),
+        segment: segment,
+      );
       windows++;
-      if (powers.isNotEmpty) usable++;
+      if (frame.screenedChannels?.isNotEmpty ?? false) {
+        usable++;
+      }
       if (windows % stride == 0) {
-        bands.add(
-          SavedBand(EegBandFrame(time, powers, buffers.length), segment),
-        );
+        bands.add(SavedBand(frame, segment));
       }
       if (bands.length > 12000) {
         final kept = [for (var i = 0; i < bands.length; i += 2) bands[i]];
@@ -206,7 +216,9 @@ Future<SignalReview> _review(Map<String, dynamic> request) async {
     'h10_ecg',
     warnings,
   )) {
-    if (!_belongs(row, request)) continue;
+    if (!_belongs(row, request)) {
+      continue;
+    }
     final time = DateTime.tryParse('${row['received_utc']}');
     if (time != null && (endTime == null || time.isAfter(endTime))) {
       endTime = time;
@@ -249,10 +261,14 @@ Future<ReplayReview> _replay(Map<String, dynamic> request) async {
         if (!_belongs(row, request)) {
           throw const FormatException('Identity mismatch');
         }
-        if (source == 'muse_eeg' && row['eegCount'] == 0) continue;
+        if (source == 'muse_eeg' && row['eegCount'] == 0) {
+          continue;
+        }
         final received = DateTime.parse(row['received_utc'] as String);
         final host = received.difference(origin).inMicroseconds / 1000000;
-        if (host < start - 10 || host > end + 10) continue;
+        if (host < start - 10 || host > end + 10) {
+          continue;
+        }
         final key = '${row['recording_segment']}:${row['continuity_segment']}';
         var broken =
             key != previousSegment ||
@@ -314,12 +330,18 @@ Future<ReplayReview> _replay(Map<String, dynamic> request) async {
           final points = target.putIfAbsent(channel.key, () => []);
           for (var i = 0; i < channel.value.length; i++) {
             final time = frameEnd - (channel.value.length - 1 - i) / rate;
-            if (time < start || time > end) continue;
-            if (++count > 50000) break;
+            if (time < start || time > end) {
+              continue;
+            }
+            if (++count > 50000) {
+              break;
+            }
             points.add((time, channel.value[i]));
           }
         }
-        if (count > 50000) break;
+        if (count > 50000) {
+          break;
+        }
       } catch (_) {
         bad++;
         previousSegment = null;

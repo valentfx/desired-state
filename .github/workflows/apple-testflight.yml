@@ -1,0 +1,88 @@
+name: Apple TestFlight upload
+
+on:
+  workflow_dispatch:
+    inputs:
+      team_id:
+        description: Your 10-character Apple Developer Team ID
+        required: true
+        type: string
+      bundle_id:
+        description: The registered Desired State iOS bundle ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apple-testflight
+  cancel-in-progress: false
+
+jobs:
+  testflight:
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      FLUTTER_VERSION: 3.47.5
+      FLUTTER_SUPPRESS_ANALYTICS: 'true'
+      DART_SUPPRESS_ANALYTICS: 'true'
+      APPLE_TEAM_ID: ${{ inputs.team_id }}
+      APPLE_BUNDLE_ID: ${{ inputs.bundle_id }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: mobile/desired_state_app
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Flutter and resolve dependencies
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch "$FLUTTER_VERSION" https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter-sdk"
+          echo "$RUNNER_TEMP/flutter-sdk/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/flutter-sdk/bin/flutter" pub get --enforce-lockfile
+      - name: Check, format, analyze and test before signing
+        run: |
+          set -euo pipefail
+          python3 ../../tools/check_apple_config.py
+          dart format lib/bluetooth_permissions.dart lib/recording_foreground_service.dart lib/device_screen.dart test/apple_platform_test.dart
+          flutter analyze --no-pub
+          flutter test --no-pub
+      - name: Install signing credentials and validate provisioning profile
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
+          ASC_PRIVATE_KEY_BASE64: ${{ secrets.ASC_PRIVATE_KEY_BASE64 }}
+        run: bash ../../tools/apple_testflight_signing.sh
+      - name: Prepare Flutter release configuration
+        run: flutter build ios --release --no-codesign --config-only --no-pub --build-number='${{ github.run_number }}.${{ github.run_attempt }}'
+      - name: Archive and export signed iPhone/iPad app
+        run: |
+          set -euo pipefail
+          xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath build/ios/archive/Runner.xcarchive \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" PRODUCT_BUNDLE_IDENTIFIER="$APPLE_BUNDLE_ID" \
+            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY='Apple Distribution' \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" archive
+          xcodebuild -exportArchive -archivePath build/ios/archive/Runner.xcarchive \
+            -exportPath build/ios/ipa -exportOptionsPlist "$SIGNING_DIR/ExportOptions.plist"
+      - name: Validate and upload to App Store Connect for TestFlight
+        run: |
+          set -euo pipefail
+          ipa_path=$(find build/ios/ipa -maxdepth 1 -name '*.ipa' -print -quit)
+          test -n "$ipa_path"
+          xcrun altool --validate-app --type ios --file "$ipa_path" --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+          xcrun altool --upload-app --type ios --file "$ipa_path" --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+      - name: Remove temporary signing material
+        if: always()
+        run: |
+          set -euo pipefail
+          security delete-keychain "$RUNNER_TEMP/desired-state-signing.keychain-db" || true
+          rm -rf "$RUNNER_TEMP/desired-state-signing"
+          if [[ -n "${PROFILE_UUID:-}" ]]; then
+            rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
+            rm -f "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
+          fi

@@ -43,3 +43,6 @@ Do not call a planned feature implemented merely because a scaffold, dependency,
 ## Current feedback and commit conventions
 
 Use help/state-feedback-and-upload-contract.md for current rating and backend contracts. User/Research experiences share acquisition and storage; detailed setup lives outside Live. Feedback is optional and Stop is immediate. Never reuse a prior feeling score as a new response. Every meaningful change updates help/current-state.md, help/roadmap.md and help/project-log.md, reviews its diff, runs appropriate checks and uses a descriptive commit explaining behavior, purpose and actual validation. Never describe unrun checks or planned backend functionality as complete.
+
+## Copyable Git messages — user requirement 2026-10-08
+For each meaningful delivery, add a descriptive commit title/body to help/git-updates.md and output that message in chat so the user can commit locally. Keep actual validation limits in the message. Continue updating help/project-log.md, current-state.md and roadmap.md; Git updates is a separate message record, not their replacement. Do not automatically commit on the user PC unless requested or the installer is invoked with an explicit commit option.

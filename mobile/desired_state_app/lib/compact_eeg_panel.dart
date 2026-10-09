@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 
 import 'eeg_live_panel.dart';
+import 'eeg_bands.dart';
+
+import 'dart:math' as math;
+
 import 'session_controller.dart';
 
 class CompactEegPanel extends StatelessWidget {
@@ -16,14 +20,18 @@ class CompactEegPanel extends StatelessWidget {
     final good =
         muse.fresh &&
         frame != null &&
-        frame.channels.length == frame.channelCount &&
+        frame.channels.isNotEmpty &&
         frame.channelCount > 0;
     final values = good
-        ? frame.values(null, relative: true)
+        ? frame.values(
+            null,
+            decibels: true,
+            artifactScreening: controller.preferences.eegArtifactScreening,
+          )
         : <String, double>{};
     final end = frame?.time ?? DateTime.now();
     final start = end.subtract(const Duration(seconds: 60));
-    const bands = ['Delta', 'Theta', 'Alpha', 'Beta'];
+    final bands = eegBands.keys;
     final series = {
       for (final band in bands)
         band: [
@@ -31,13 +39,25 @@ class CompactEegPanel extends StatelessWidget {
             if (!item.time.isBefore(start))
               (
                 item.time.difference(start).inMicroseconds / 1000000,
-                item.channels.length == item.channelCount &&
-                        item.channelCount > 0
-                    ? item.values(null, relative: true)[band] ?? double.nan
+                item.channels.isNotEmpty && item.channelCount > 0
+                    ? item.values(
+                            null,
+                            decibels: true,
+                            artifactScreening:
+                                controller.preferences.eegArtifactScreening,
+                          )[band] ??
+                          double.nan
                     : double.nan,
               ),
         ],
     };
+    final finite = series.values
+        .expand((p) => p)
+        .map((p) => p.$2)
+        .where((v) => v.isFinite)
+        .toList();
+    final low = finite.isEmpty ? -10.0 : finite.reduce(math.min) - 2;
+    final high = finite.isEmpty ? 10.0 : finite.reduce(math.max) + 2;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(8),
@@ -46,8 +66,8 @@ class CompactEegPanel extends StatelessWidget {
           children: [
             Text(
               good
-                  ? 'EEG band share · ${frame.channelCount}/${frame.channelCount} channels'
-                  : 'EEG · poor or stale signal',
+                  ? 'EEG powerbands · ${frame.channelCount}/${frame.channelCount} channels'
+                  : 'EEG · waiting or stale',
               style: Theme.of(context).textTheme.titleSmall,
             ),
             SizedBox(
@@ -64,20 +84,21 @@ class CompactEegPanel extends StatelessWidget {
                       .toList(),
                   left: 0,
                   right: 60,
-                  minimum: 0,
-                  maximum: 100,
-                  yLabel: '%',
+                  minimum: low,
+                  maximum: high,
+                  yLabel: 'dB',
                   colors: const {
                     'Delta': Colors.purple,
                     'Alpha': Colors.blue,
                     'Theta': Colors.teal,
                     'Beta': Colors.deepOrange,
+                    'Gamma': Colors.pink,
                   },
                 ),
               ),
             ),
             const Text(
-              'Share of 1–30 Hz power · not a state score',
+              'dB re 1 µV² · not a state score',
               style: TextStyle(fontSize: 10),
             ),
             Wrap(
@@ -85,17 +106,8 @@ class CompactEegPanel extends StatelessWidget {
               children: [
                 for (final band in bands)
                   Text(
-                    '$band ${values[band]?.toStringAsFixed(0) ?? '--'}%',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: band == 'Delta'
-                          ? Colors.purple
-                          : band == 'Alpha'
-                          ? Colors.blue
-                          : band == 'Theta'
-                          ? Colors.teal
-                          : Colors.deepOrange,
-                    ),
+                    '${band[0]} ${values[band]?.toStringAsFixed(0) ?? '--'}',
+                    style: TextStyle(fontSize: 12, color: eegBandColors[band]),
                   ),
               ],
             ),

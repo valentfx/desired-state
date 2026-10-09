@@ -192,3 +192,24 @@ Package compatibility repair: fetched work-PC c2105df and reconciled the timer/m
 ## Live layout cleanup — 2026-10-07
 Source cleanup moves applied-filter explanations into Metric details and removes the duplicate EEG quality expansion from the compact card. Confirm on phone that lower data is visible and quality checks/filter explanations remain accessible through Metric details. No added live text/controls; no filtering math changes. Flutter checks and physical viewport confirmation pending.
 Timer customization: the existing label/subtitle opens the dialog; presets 5/10/20/30/60 minutes supplement custom 1–1440-minute input. Duration/vibration persistence unchanged. Android completion uses the existing 700ms ToneGenerator chime on STREAM_MUSIC and optional 400ms vibration; audibility depends on media volume/output and hardware validation remains pending. No added live rows.
+
+## EEG/optical acceptance — 2026-10-08
+Implemented source: persisted optional artifact screening off by default, Gamma/shared dB powerbands, detail/Analyze comparison, concise processing tools, experimental Athena optical recording.
+- [ ] Pass full Flutter analysis/tests, Windows release and signed Android build via installer; verify compact Session viewport and immediate comparison repaint.
+- [ ] Verify p1035 supplies EEG and optical channels; record a short known-fit session, inspect raw optical values/timestamps after stop/USB sync and verify upload/export inclusion. p21 remains available.
+- [ ] Compare identical raw input with current official SDK/basic outputs before claiming numerical Muse parity. Window/hop/averaging remain our documented Hann pipeline; no proprietary Calm replication claimed.
+- [ ] Establish optical wavelength/channel mapping, geometry, calibration and motion/ambient-light checks before hemoglobin/oxygenation processing. Raw intensity remains distinct from O2Ring SpO2 and vendor brain oxygenation.
+
+
+## Work PC packaging and Git messages — 2026-10-08
+Update rebased onto pushed main 05d61b1 with current timer/layout and diagnostic source retained. Guarded installer expects this committed source, adds help/git-updates.md for copyable messages and actual PC validation, and leaves changes for manual commit unless -CommitChanges is explicitly supplied. Full Flutter validation still runs on PC; numerical and syntax/package checks performed here.
+
+
+EEG installer repair R3: Preserve local AGENTS.md contents and append only the copyable-Git-message policy after source preflight. Application-source guards remain enabled. Package/diff checks performed; PowerShell execution and Flutter checks pending on PC.
+
+Work-PC validation: Flutter analysis passed after context guard; full tests reported three failures from legacy raw-default and EEG-label expectations. Update preset tests to raw defaults and Analyze widget test to exercise current dB/µV²/overlay controls. Absolute power axis starts at zero; dB retains signed range. Source syntax/format and diff checks run locally; full suite/builds must resume on PC.
+
+
+
+## Apple delivery gates — 2026-10-09
+Bootstrap source and manual cloud workflows are prepared; Apple support is not yet runtime-validated. First pass the unsigned iOS build, then configure Apple team/bundle ID and distribution/API credentials for manual TestFlight upload. Validate app lifecycle, saved analysis, H10/O2Ring hardware, denied permissions, exports, reconnect and locked-screen continuity on iPhone/iPad. Port the Muse native bridge separately. Compile/test macOS and choose its signing/notarization distribution route after iOS validation. See apple-development.md for the exact Windows-to-cloud workflow and current limits.

@@ -72,6 +72,9 @@ class SessionController extends ChangeNotifier {
             'device_hint': museAthena.deviceHint,
             'eeg_rate_hz': museAthena.eegRate,
             'motion_rate_hz': museAthena.motionRate,
+            'optical_rate_hz': museAthena.opticalRate,
+            'acquisition_preset': museAthena.acquisitionPreset,
+            'optical_units': 'raw_device_intensity',
             'recording_segment': _segment,
           }),
         );
@@ -656,7 +659,11 @@ class SessionController extends ChangeNotifier {
         logger.logEegBands({
           'received_utc': frame.time.toIso8601String(),
           'channels': frame.channels,
-          'usable_channels': frame.channels.length,
+          'screened_channels': frame.screenedChannels,
+          'quality_reasons': frame.qualityReasons,
+          'artifact_screening_enabled': preferences.eegArtifactScreening,
+          'processing_version': 2,
+          'usable_channels': frame.screenedChannels?.length ?? 0,
           'total_channels': frame.channelCount,
           'sample_rate_hz': museAthena.eegRate,
           'continuity_segment': museAthena.continuity,
@@ -842,8 +849,10 @@ class SessionController extends ChangeNotifier {
       await opened.writeEvent(
         'eeg_processing_initial',
         description: jsonEncode({
-          'version': 1,
-          'method': 'hann_periodogram_1_30hz_v1',
+          'version': 2,
+          'method': 'hann_periodogram_0_5_100hz_v2',
+          'artifact_screening_enabled': preferences.eegArtifactScreening,
+          'acquisition_preset': museAthena.acquisitionPreset,
           'bands_hz': {
             for (final e in eegBands.entries) e.key: [e.value.$1, e.value.$2],
           },

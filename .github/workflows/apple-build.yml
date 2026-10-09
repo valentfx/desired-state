@@ -1,0 +1,79 @@
+name: Apple build check
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Apple target to compile (no signing or upload)
+        required: true
+        default: ios
+        type: choice
+        options: [ios, macos, both]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apple-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      FLUTTER_VERSION: 3.47.5
+      FLUTTER_SUPPRESS_ANALYTICS: 'true'
+      DART_SUPPRESS_ANALYTICS: 'true'
+    defaults:
+      run:
+        shell: bash
+        working-directory: mobile/desired_state_app
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the project's pinned Flutter SDK
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch "$FLUTTER_VERSION" https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter-sdk"
+          echo "$RUNNER_TEMP/flutter-sdk/bin" >> "$GITHUB_PATH"
+      - name: Record build tool versions
+        run: |
+          flutter --version
+          xcodebuild -version
+          flutter doctor -v
+      - name: Resolve locked dependencies
+        run: flutter pub get --enforce-lockfile
+      - name: Check native Apple configuration
+        run: python3 ../../tools/check_apple_config.py
+      - name: Format touched Dart sources before verification
+        run: dart format lib/bluetooth_permissions.dart lib/recording_foreground_service.dart lib/device_screen.dart test/apple_platform_test.dart
+      - name: Analyze and test shared application
+        run: |
+          set -euo pipefail
+          flutter analyze --no-pub
+          flutter test --no-pub
+      - name: Compile unsigned iPhone and iPad application
+        if: inputs.target == 'ios' || inputs.target == 'both'
+        run: flutter build ios --release --no-codesign --no-pub
+      - name: Compile macOS application
+        if: inputs.target == 'macos' || inputs.target == 'both'
+        run: flutter build macos --release --no-pub
+      - name: Archive compiled apps with executable permissions preserved
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/apple-artifacts"
+          if [[ '${{ inputs.target }}' != 'macos' ]]; then
+            ditto -c -k --sequesterRsrc --keepParent build/ios/iphoneos/Runner.app "$RUNNER_TEMP/apple-artifacts/ios-unsigned.zip"
+          fi
+          if [[ '${{ inputs.target }}' != 'ios' ]]; then
+            app_path=$(find build/macos/Build/Products/Release -maxdepth 1 -name '*.app' -print -quit)
+            test -n "$app_path"
+            ditto -c -k --sequesterRsrc --keepParent "$app_path" "$RUNNER_TEMP/apple-artifacts/macos-development.zip"
+          fi
+      - name: Save build artifacts for inspection (not TestFlight packages)
+        uses: actions/upload-artifact@v4
+        with:
+          name: desired-state-apple-${{ inputs.target }}-${{ github.run_number }}
+          path: ${{ runner.temp }}/apple-artifacts/*.zip
+          if-no-files-found: error
+          retention-days: 7

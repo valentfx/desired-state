@@ -23,6 +23,7 @@ class MuseAthenaBridge(engine: FlutterEngine) : EventChannel.StreamHandler {
     private var poll: ScheduledFuture<*>? = null
     private var started = false
     private val boardId = BoardIds.MUSE_S_ATHENA_BOARD.get_code()
+    private val opticalPreset = BrainFlowPresets.ANCILLARY_PRESET
     private val motionPreset = BrainFlowPresets.AUXILIARY_PRESET
 
     init {
@@ -32,6 +33,11 @@ class MuseAthenaBridge(engine: FlutterEngine) : EventChannel.StreamHandler {
                 when (call.method) {
                     "start" -> {
                         val serial = call.argument<String>("serialNumber")?.trim().orEmpty()
+                        val preset = call.argument<String>("preset") ?: "p21"
+                        if (preset !in listOf("p21", "p1035")) {
+                            result.error("invalid_preset", "Unsupported Athena acquisition preset", null)
+                            return@setMethodCallHandler
+                        }
                         worker.execute {
                             try {
                                 stopBoard()
@@ -39,7 +45,7 @@ class MuseAthenaBridge(engine: FlutterEngine) : EventChannel.StreamHandler {
                                 params.timeout = 20
                                 if (serial.isNotEmpty()) params.serial_number = serial
                                 // Match the independently hardware-validated Android sample.
-                                params.other_info = "preset=p21;low_latency=true"
+                                params.other_info = "preset=$preset;low_latency=true"
                                 val candidate = BoardShim(boardId, params)
                                 board = candidate
                                 candidate.prepare_session()
@@ -49,6 +55,7 @@ class MuseAthenaBridge(engine: FlutterEngine) : EventChannel.StreamHandler {
                                     "deviceHint" to if (serial.isEmpty()) "Muse S Athena" else serial,
                                     "eegRate" to BoardShim.get_sampling_rate(boardId),
                                     "motionRate" to BoardShim.get_sampling_rate(boardId, motionPreset),
+                                    "opticalRate" to BoardShim.get_sampling_rate(boardId, opticalPreset),
                                     "eegChannels" to BoardShim.get_eeg_channels(boardId).size,
                                     "accelChannels" to BoardShim.get_accel_channels(boardId, motionPreset).size,
                                 )
@@ -80,24 +87,33 @@ class MuseAthenaBridge(engine: FlutterEngine) : EventChannel.StreamHandler {
         try {
             val eeg = active.get_board_data()
             val motion = active.get_board_data(motionPreset)
+            val optical = active.get_board_data(opticalPreset)
             val eegIndices = BoardShim.get_eeg_channels(boardId)
             val accelIndices = BoardShim.get_accel_channels(boardId, motionPreset)
             val gyroIndices = BoardShim.get_gyro_channels(boardId, motionPreset)
             val eegTimestampRow = BoardShim.get_timestamp_channel(boardId)
             val motionTimestampRow = BoardShim.get_timestamp_channel(boardId, motionPreset)
+            val opticalIndices = BoardShim.get_optical_channels(boardId, opticalPreset)
+            val opticalTimestampRow = BoardShim.get_timestamp_channel(boardId, opticalPreset)
+            val batteryRow = BoardShim.get_battery_channel(boardId, opticalPreset)
+            val opticalCount = optical.firstOrNull()?.size ?: 0
             val eegCount = eeg.firstOrNull()?.size ?: 0
             val motionCount = motion.firstOrNull()?.size ?: 0
-            if (eegCount == 0 && motionCount == 0) return
+            if (eegCount == 0 && motionCount == 0 && opticalCount == 0) return
             val packet = hashMapOf<String, Any>(
                 "type" to "samples",
                 "eegCount" to eegCount,
                 "motionCount" to motionCount,
+                "opticalCount" to opticalCount,
+                "opticalTimestamps" to optical.getOrNull(opticalTimestampRow)?.toList().orEmpty(),
+                "optical" to channelRows(optical, opticalIndices, "OPT"),
                 "eegTimestamps" to eeg.getOrNull(eegTimestampRow)?.toList().orEmpty(),
                 "motionTimestamps" to motion.getOrNull(motionTimestampRow)?.toList().orEmpty(),
                 "eeg" to channelRows(eeg, eegIndices, "EEG"),
                 "accel" to channelRows(motion, accelIndices, "ACC"),
                 "gyro" to channelRows(motion, gyroIndices, "GYRO"),
             )
+            optical.getOrNull(batteryRow)?.lastOrNull()?.let { packet["batteryRaw"] = it }
             main.post { sink?.success(packet) }
         } catch (failure: Throwable) {
             started = false
