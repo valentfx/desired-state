@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import 'session_history.dart';
+import 'plot_inspection.dart';
+import 'plot_template.dart';
 
 /// Display-only reduction: retain extrema and every discontinuity.
 List<HistoryPoint> reduceHistoryPoints(
@@ -61,10 +63,12 @@ class HistoryPlot extends StatelessWidget {
     required this.color,
     required this.onInspect,
     this.cursor,
+    this.origin,
   });
   final String title, unit;
   final List<HistoryPoint> points;
   final DateTime start, end;
+  final DateTime? origin;
   final List<DateTime> events;
   final Color color;
   final DateTime? cursor;
@@ -124,15 +128,50 @@ class HistoryPlot extends StatelessWidget {
                     child: SizedBox(
                       height: 130,
                       width: double.infinity,
-                      child: CustomPaint(
-                        painter: _HistoryPainter(
-                          reduceHistoryPoints(visible),
-                          start,
-                          end,
-                          events,
-                          color,
-                          cursor,
-                          unit,
+                      child: InspectableSignalPlot(
+                        series: {
+                          title: [
+                            for (final p in visible)
+                              (
+                                p.time.difference(start).inMicroseconds /
+                                    1000000,
+                                p.value ?? double.nan,
+                              ),
+                          ],
+                        },
+                        origin: start,
+                        left: 0,
+                        right: math.max(
+                          .001,
+                          end.difference(start).inMicroseconds / 1000000,
+                        ),
+                        unit: unit,
+                        leftInset: 54,
+                        onInspect: (time) {
+                          if (visible.isEmpty) return;
+                          final nearest = visible.reduce(
+                            (a, b) =>
+                                a.time.difference(time).abs() <=
+                                    b.time.difference(time).abs()
+                                ? a
+                                : b,
+                          );
+                          onInspect(nearest);
+                        },
+                        child: CustomPaint(
+                          painter: _HistoryPainter(
+                            reduceHistoryPoints(visible),
+                            start,
+                            end,
+                            events,
+                            color,
+                            cursor,
+                            unit,
+                            origin:
+                                origin ??
+                                PlotInspectionScope.of(context)?.origin ??
+                                start,
+                          ),
                         ),
                       ),
                     ),
@@ -159,9 +198,11 @@ class _HistoryPainter extends CustomPainter {
     this.rightAxis = false,
     this.reserveRightAxis = false,
     this.drawFrame = true,
+    this.origin,
   });
   final List<HistoryPoint> points;
   final DateTime start, end;
+  final DateTime? origin;
   final List<DateTime> events;
   final Color color;
   final String unit;
@@ -169,12 +210,7 @@ class _HistoryPainter extends CustomPainter {
   final DateTime? cursor;
   @override
   void paint(Canvas canvas, Size size) {
-    final rect = Rect.fromLTWH(
-      54,
-      16,
-      math.max(1, size.width - (reserveRightAxis ? 108 : 62)),
-      size.height - 42,
-    );
+    final rect = PlotTemplate.area(size, dualAxis: reserveRightAxis);
     final span = math.max(1, end.difference(start).inMicroseconds);
     double x(DateTime time) =>
         rect.left + time.difference(start).inMicroseconds / span * rect.width;
@@ -196,12 +232,21 @@ class _HistoryPainter extends CustomPainter {
       label(unit, Offset(rightAxis ? size.width - 46 : 0, 0));
     }
     if (drawFrame) {
-      label('0', Offset(rect.left, rect.bottom + 4));
+      final offset = start.difference(origin ?? start).inMicroseconds / 1000000;
+      final divisions = rect.width < 260 ? 2 : 4;
+      for (var i = 0; i <= divisions; i++) {
+        label(
+          elapsedLabel(offset + span / 1000000 * i / divisions),
+          Offset(
+            rect.left + rect.width * i / divisions - (i == 0 ? 0 : 20),
+            rect.bottom + 4,
+          ),
+        );
+      }
       label(
-        (span / 1000000).toStringAsFixed(0),
-        Offset(rect.right - 24, rect.bottom + 4),
+        'Recording elapsed (mm:ss)',
+        Offset(rect.center.dx - 60, size.height - 12),
       );
-      label('Elapsed time (s)', Offset(rect.center.dx - 35, rect.bottom + 4));
     }
     canvas.save();
     canvas.clipRect(rect);
@@ -210,7 +255,7 @@ class _HistoryPainter extends CustomPainter {
       canvas.drawLine(
         Offset(rect.left, y),
         Offset(rect.right, y),
-        Paint()..color = Colors.grey.withValues(alpha: .25),
+        Paint()..color = PlotTemplate.gridColor,
       );
     }
     for (final event in (drawFrame ? events : <DateTime>[])) {
@@ -268,15 +313,6 @@ class _HistoryPainter extends CustomPainter {
         previous = point;
       }
     }
-    if (cursor != null) {
-      canvas.drawLine(
-        Offset(x(cursor!), rect.top),
-        Offset(x(cursor!), rect.bottom),
-        Paint()
-          ..color = Colors.deepPurple
-          ..strokeWidth = 2,
-      );
-    }
     canvas.restore();
   }
 
@@ -297,11 +333,13 @@ class RelativeOverlayPlot extends StatelessWidget {
     required this.events,
     required this.onInspect,
     this.cursor,
+    this.origin,
     this.onPan,
   });
   final Map<String, List<HistoryPoint>> series;
   final Map<String, Color> colors;
   final DateTime start, end;
+  final DateTime? origin;
   final List<DateTime> events;
   final DateTime? cursor;
   final ValueChanged<DateTime> onInspect;
@@ -333,38 +371,64 @@ class RelativeOverlayPlot extends StatelessWidget {
               inspect(d.localPosition.dx);
             }
           },
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              for (final (index, entry) in series.entries.indexed)
-                CustomPaint(
-                  painter: _HistoryPainter(
-                    reduceHistoryPoints(
-                      entry.value
-                          .where(
-                            (p) =>
-                                !p.time.isBefore(start) && !p.time.isAfter(end),
-                          )
-                          .toList(),
+          child: InspectableSignalPlot(
+            series: {
+              for (final entry in series.entries)
+                entry.key: [
+                  for (final p in entry.value)
+                    (
+                      p.time.difference(start).inMicroseconds / 1000000,
+                      p.value ?? double.nan,
                     ),
-                    start,
-                    end,
-                    events,
-                    colors[entry.key]!,
-                    cursor,
-                    index < 2
-                        ? (entry.key == 'HR'
-                              ? 'bpm'
-                              : entry.key == 'RMSSD'
-                              ? 'ms'
-                              : entry.key)
-                        : '',
-                    rightAxis: index == 1,
-                    reserveRightAxis: true,
-                    drawFrame: index == 0,
+                ],
+            },
+            origin: start,
+            left: 0,
+            right: math.max(
+              .001,
+              end.difference(start).inMicroseconds / 1000000,
+            ),
+            leftInset: 54,
+            rightInset: 54,
+            onInspect: onInspect,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                for (final (index, entry) in series.entries.indexed)
+                  CustomPaint(
+                    painter: _HistoryPainter(
+                      reduceHistoryPoints(
+                        entry.value
+                            .where(
+                              (p) =>
+                                  !p.time.isBefore(start) &&
+                                  !p.time.isAfter(end),
+                            )
+                            .toList(),
+                      ),
+                      start,
+                      end,
+                      events,
+                      colors[entry.key]!,
+                      cursor,
+                      index < 2
+                          ? (entry.key == 'HR'
+                                ? 'bpm'
+                                : entry.key == 'RMSSD'
+                                ? 'ms'
+                                : entry.key)
+                          : '',
+                      rightAxis: index == 1,
+                      reserveRightAxis: true,
+                      drawFrame: index == 0,
+                      origin:
+                          origin ??
+                          PlotInspectionScope.of(context)?.origin ??
+                          start,
+                    ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       );

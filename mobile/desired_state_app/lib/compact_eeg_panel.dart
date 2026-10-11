@@ -73,9 +73,10 @@ class CompactEegPanel extends StatelessWidget {
             SizedBox(
               height: 100,
               width: double.infinity,
-              child: CustomPaint(
+              child: SignalPlot(
                 painter: EegAxisPainter(
                   series,
+                  timeOrigin: start,
                   events: controller.eventTimes
                       .map(
                         (time) =>

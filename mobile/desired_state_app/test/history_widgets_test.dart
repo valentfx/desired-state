@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:desired_state_app/history_plot.dart';
+import 'package:desired_state_app/plot_inspection.dart';
 import 'package:desired_state_app/history_screen.dart';
 import 'package:desired_state_app/main.dart';
 import 'package:desired_state_app/session_controller.dart';
@@ -62,7 +63,7 @@ void main() {
       await tester.pumpWidget(plot(points));
       final gesture = find.descendant(
         of: find.byType(HistoryPlot),
-        matching: find.byType(GestureDetector),
+        matching: find.byType(InspectableSignalPlot),
       );
       final rect = tester.getRect(gesture);
       await tester.tapAt(
@@ -272,20 +273,38 @@ void main() {
       );
       await settleIo(
         tester,
-        () => find.byTooltip('Session settings').evaluate().isNotEmpty,
+        () => find.byTooltip('Recording settings').evaluate().isNotEmpty,
       );
       debugPrint('Active History: opening advanced tools');
       await tester.tap(find.byTooltip('Advanced tools'));
       await settleIo(
         tester,
-        () => find.text('Session tools').evaluate().isNotEmpty,
+        () => find.text('Recording tools').evaluate().isNotEmpty,
       );
       debugPrint('Active History: loading session list');
+      await tester.ensureVisible(find.text('History'));
+      await tester.pump();
       await tester.tap(find.text('History'));
       await settleIo(
         tester,
-        () => find.textContaining('Active fixture').evaluate().isNotEmpty,
+        () => find
+            .text('Filter by participant, type and date')
+            .evaluate()
+            .isNotEmpty,
       );
+      await tester.scrollUntilVisible(
+        find.text('Active fixture'),
+        160,
+        scrollable: find
+            .descendant(
+              of: find.byType(HistoryScreen),
+              matching: find.byWidgetPredicate(
+                (w) => w is Scrollable && w.axisDirection == AxisDirection.down,
+              ),
+            )
+            .first,
+      );
+      await tester.pump();
       debugPrint('Active History: opening active snapshot');
       polar.emit([1020]);
       await tester.tap(find.textContaining('Active fixture'));
@@ -293,7 +312,8 @@ void main() {
         tester,
         () => find.text('Edit notes & tags').evaluate().isNotEmpty,
       );
-      expect(find.textContaining('Recording continues'), findsOneWidget);
+      expect(find.textContaining('Recording continues'), findsNothing);
+      expect(find.text('Assign/edit participant'), findsNothing);
       expect(
         tester
             .widget<FilledButton>(
@@ -312,12 +332,10 @@ void main() {
       );
       debugPrint('Active History: returning to Live');
       polar.emit([1030]);
-      await tester.tap(
-        find.descendant(
-          of: find.byType(RecordingHistoryBanner),
-          matching: find.text('Session'),
-        ),
-      );
+      for (var i = 0; i < 3; i++) {
+        await tester.pageBack();
+        await tester.pumpAndSettle();
+      }
       await settleIo(
         tester,
         () => find.byTooltip('Stop recording').evaluate().isNotEmpty,

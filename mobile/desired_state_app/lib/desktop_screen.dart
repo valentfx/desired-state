@@ -9,6 +9,8 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'desktop_store.dart';
+import 'plot_template.dart';
+import 'plot_inspection.dart';
 import 'backend_upload_screen.dart';
 import 'upload_status.dart';
 import 'desktop_sync.dart';
@@ -633,14 +635,7 @@ class _DesktopScreenState extends State<DesktopScreen> {
   }
 
   String _time(double seconds) {
-    final origin = _entry?.started;
-    if (origin == null) {
-      return '';
-    }
-    final t = origin
-        .add(Duration(milliseconds: (seconds * 1000).round()))
-        .toLocal();
-    return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}:${t.second.toString().padLeft(2, '0')}';
+    return elapsedLabel(seconds);
   }
 
   double? _eventTime(Map<String, dynamic> event) {
@@ -1376,8 +1371,12 @@ class DesktopSignalPlot extends StatelessWidget {
                 builder: (context, constraints) {
                   double selectedTime(Offset position) =>
                       start +
-                      ((position.dx - 65) /
-                                  math.max(1, constraints.maxWidth - 130))
+                      ((position.dx - PlotTemplate.left) /
+                                  math.max(
+                                    1,
+                                    constraints.maxWidth -
+                                        2 * PlotTemplate.left,
+                                  ))
                               .clamp(0.0, 1.0) *
                           (end - start);
                   return GestureDetector(
@@ -1430,12 +1429,7 @@ class DesktopLinePainter extends CustomPainter {
   final String Function(double) timeLabel;
   @override
   void paint(Canvas canvas, Size size) {
-    final rect = Rect.fromLTRB(
-      65,
-      14,
-      math.max(66, size.width - 65),
-      size.height - 28,
-    );
+    final rect = PlotTemplate.area(size, dualAxis: true);
     final pad = math.max(.01, (high - low) * .08);
     final minimum = low - pad, maximum = high + pad;
     double x(double t) =>
@@ -1454,7 +1448,7 @@ class DesktopLinePainter extends CustomPainter {
     }
 
     final grid = Paint()
-      ..color = Colors.black12
+      ..color = PlotTemplate.gridColor
       ..strokeWidth = 1;
     for (var i = 0; i <= 4; i++) {
       final v = minimum + (maximum - minimum) * i / 4;

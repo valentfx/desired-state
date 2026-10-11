@@ -10,6 +10,8 @@ import 'package:flutter/foundation.dart';
 import 'eeg_live_panel.dart';
 import 'session_controller.dart';
 import 'recorded_posture.dart';
+import 'plot_inspection.dart';
+import 'session_history.dart';
 
 class TimelineReader {
   final Map<String, int> _offsets = {};
@@ -435,122 +437,144 @@ class _SessionTimelineScreenState extends State<SessionTimelineScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: widget.embedded
-        ? null
-        : AppBar(
-            title: Text(widget.title),
-            actions: [
-              IconButton(
-                tooltip: 'Refresh signals',
-                onPressed: _loading ? null : _refresh,
-                icon: const Icon(Icons.refresh),
+  Widget build(BuildContext context) => PlotInspectionScope(
+    saved: true,
+    origin: widget.origin,
+    controller: widget.controller,
+    sampleDescription: 'Nearest retained timeline point; display reduction may omit samples; streams are not synchronized',
+    valuesAt: (time) => {
+      for (final entry in _data.entries.where((e) => e.key != 'Markers'))
+        inspectionKey(entry.key): nearestInspection(
+          [
+            for (final p in entry.value)
+              HistoryPoint(
+                widget.origin.add(
+                  Duration(microseconds: (p.$1 * 1000000).round()),
+                ),
+                p.$2,
+                0,
               ),
-            ],
-          ),
-    body: ListView(
-      padding: const EdgeInsets.all(12),
-      children: [
-        if (_active) const Text('Recording continues · viewing saved data'),
-        Wrap(
-          spacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            if (widget.embedded)
-              IconButton(
-                tooltip: 'Refresh signals',
-                onPressed: _loading ? null : _refresh,
-                icon: const Icon(Icons.refresh),
-              ),
-            ChoiceChip(
-              label: const Text('Follow live'),
-              selected: _follow,
-              onSelected: (_) {
-                setState(() => _follow = true);
-                _refresh();
-              },
+          ],
+          time,
+          entry.key,
+        ),
+    },
+    child: Scaffold(
+      appBar: widget.embedded
+          ? null
+          : AppBar(
+              title: Text(widget.title),
+              actions: [
+                IconButton(
+                  tooltip: 'Refresh signals',
+                  onPressed: _loading ? null : _refresh,
+                  icon: const Icon(Icons.refresh),
+                ),
+              ],
             ),
-            for (final seconds in [30, 60, 300])
+      body: ListView(
+        padding: const EdgeInsets.all(12),
+        children: [
+          Wrap(
+            spacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              if (widget.embedded)
+                IconButton(
+                  tooltip: 'Refresh signals',
+                  onPressed: _loading ? null : _refresh,
+                  icon: const Icon(Icons.refresh),
+                ),
               ChoiceChip(
-                label: Text('${seconds}s'),
-                selected: _seconds == seconds,
+                label: const Text('Follow live'),
+                selected: _follow,
                 onSelected: (_) {
-                  setState(() => _seconds = seconds);
+                  setState(() => _follow = true);
                   _refresh();
                 },
               ),
-            IconButton(
-              tooltip: 'Earlier interval',
-              onPressed: _loading
-                  ? null
-                  : () {
-                      setState(() {
-                        _follow = false;
-                        _right = math.max(1, _right - _seconds * .8);
-                      });
-                      _refresh();
-                    },
-              icon: const Icon(Icons.chevron_left),
-            ),
-            IconButton(
-              tooltip: 'Later interval',
-              onPressed: _loading
-                  ? null
-                  : () {
-                      setState(() {
-                        _follow = false;
-                        _right = math.min(_duration, _right + _seconds * .8);
-                      });
-                      _refresh();
-                    },
-              icon: const Icon(Icons.chevron_right),
-            ),
-          ],
-        ),
-        Slider(
-          value: _right.clamp(0.0, _duration).toDouble(),
-          min: 0,
-          max: _duration,
-          onChanged: _loading
-              ? null
-              : (v) => setState(() {
-                  _follow = false;
-                  _right = v;
-                }),
-          onChangeEnd: (_) => _refresh(),
-        ),
-        Text(
-          '${widget.origin.add(Duration(milliseconds: (_shownStart * 1000).round())).toLocal()} — ${widget.origin.add(Duration(milliseconds: (_shownEnd * 1000).round())).toLocal()}',
-        ),
-        SwitchListTile(
-          title: const Text('Raw waveforms and motion'),
-          value: _raw,
-          onChanged: (v) => setState(() => _raw = v),
-        ),
-        if (_loading) const LinearProgressIndicator(),
-        if (_error != null) Text(_error!),
-        if (!_loading &&
-            !_data.containsKey('Sleep position (recorded estimate)'))
-          const Text(
-            'No recorded posture estimates. Raw acceleration may be available under motion. Older recordings are not automatically assigned positions; calibrated H10 estimates are needed.',
+              for (final seconds in [30, 60, 300])
+                ChoiceChip(
+                  label: Text('${seconds}s'),
+                  selected: _seconds == seconds,
+                  onSelected: (_) {
+                    setState(() => _seconds = seconds);
+                    _refresh();
+                  },
+                ),
+              IconButton(
+                tooltip: 'Earlier interval',
+                onPressed: _loading
+                    ? null
+                    : () {
+                        setState(() {
+                          _follow = false;
+                          _right = math.max(1, _right - _seconds * .8);
+                        });
+                        _refresh();
+                      },
+                icon: const Icon(Icons.chevron_left),
+              ),
+              IconButton(
+                tooltip: 'Later interval',
+                onPressed: _loading
+                    ? null
+                    : () {
+                        setState(() {
+                          _follow = false;
+                          _right = math.min(_duration, _right + _seconds * .8);
+                        });
+                        _refresh();
+                      },
+                icon: const Icon(Icons.chevron_right),
+              ),
+            ],
           ),
-        if (_data.isEmpty && !_loading)
-          const Text('No saved samples in this interval.'),
-        for (final entry in _data.entries)
-          if (entry.key != 'Markers' &&
-              (_raw ||
-                  (!entry.key.startsWith('ECG') &&
-                      !entry.key.startsWith('ACC') &&
-                      !entry.key.startsWith('Muse '))))
-            _plot(entry.key, entry.value),
-        for (final warning in _reader.warnings) Text(warning),
-        const Padding(
-          padding: EdgeInsets.all(12),
-          child: Text(
-            'Raw samples retain device timestamps in the files. This view aligns batches by phone receipt time; waveform timing across devices is approximate. EEG band files keep their recorded processing; Analyze EEG comparison recomputes from raw samples with optional screening.',
+          Slider(
+            value: _right.clamp(0.0, _duration).toDouble(),
+            min: 0,
+            max: _duration,
+            onChanged: _loading
+                ? null
+                : (v) => setState(() {
+                    _follow = false;
+                    _right = v;
+                  }),
+            onChangeEnd: (_) => _refresh(),
           ),
-        ),
-      ],
+          Text(
+            '${widget.origin.add(Duration(milliseconds: (_shownStart * 1000).round())).toLocal()} — ${widget.origin.add(Duration(milliseconds: (_shownEnd * 1000).round())).toLocal()}',
+          ),
+          SwitchListTile(
+            title: const Text('Raw waveforms and motion'),
+            value: _raw,
+            onChanged: (v) => setState(() => _raw = v),
+          ),
+          if (_loading) const LinearProgressIndicator(),
+          if (_error != null) Text(_error!),
+          if (!_loading &&
+              !_data.containsKey('Sleep position (recorded estimate)'))
+            const Text(
+              'No recorded posture estimates. Raw acceleration may be available under motion. Older recordings are not automatically assigned positions; calibrated H10 estimates are needed.',
+            ),
+          if (_data.isEmpty && !_loading)
+            const Text('No saved samples in this interval.'),
+          for (final entry in _data.entries)
+            if (entry.key != 'Markers' &&
+                (_raw ||
+                    (!entry.key.startsWith('ECG') &&
+                        !entry.key.startsWith('ACC') &&
+                        !entry.key.startsWith('Muse '))))
+              _plot(entry.key, entry.value),
+          for (final warning in _reader.warnings) Text(warning),
+          const Padding(
+            padding: EdgeInsets.all(12),
+            child: Text(
+              'Raw samples retain device timestamps in the files. This view aligns batches by phone receipt time; waveform timing across devices is approximate. EEG band files keep their recorded processing; Analyze EEG comparison recomputes from raw samples with optional screening.',
+            ),
+          ),
+        ],
+      ),
     ),
   );
   Widget _plot(String title, List<(double, double)> points) {
@@ -574,9 +598,10 @@ class _SessionTimelineScreenState extends State<SessionTimelineScreen> {
         SizedBox(
           height: 150,
           width: double.infinity,
-          child: CustomPaint(
+          child: SignalPlot(
             painter: EegAxisPainter(
               {title: points},
+              timeOrigin: widget.origin,
               left: _shownStart,
               right: math.max(_shownStart + .001, _shownEnd),
               minimum: low - pad,

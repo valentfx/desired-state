@@ -114,7 +114,72 @@ class RecordingTypeStore {
     if (pending != null) {
       await pending;
     }
-    return _read();
+    final usagePending = _usageWrites;
+    if (usagePending != null) {
+      await usagePending;
+    }
+    final types = await _read();
+    final usage = await _usage();
+    final entries = types.entries.indexed.toList()
+      ..sort((a, b) {
+        final count = (usage[b.$2.key] ?? 0).compareTo(usage[a.$2.key] ?? 0);
+        return count != 0 ? count : a.$1.compareTo(b.$1);
+      });
+    return {for (final e in entries) e.$2.key: e.$2.value};
+  }
+
+  // Retain only pending writes, not a completed future and its creation zone.
+  static Future<void>? _usageWrites;
+  Future<Map<String, int>> _usage() async {
+    final file = File(
+      '${(await _file()).parent.path}/recording_type_usage.json',
+    );
+    if (!await file.exists()) return {};
+    final row = jsonDecode(await file.readAsString());
+    if (row is! Map ||
+        row['version'] != 1 ||
+        row['uses'] is! Map ||
+        !(row['uses'] as Map).entries.every(
+          (e) => e.key is String && e.value is int && e.value >= 0,
+        )) {
+      throw const FormatException(
+        'Invalid recording type usage; original preserved',
+      );
+    }
+    return Map<String, int>.from(row['uses'] as Map);
+  }
+
+  Future<void> recordUse(String id) {
+    final operation = (_usageWrites ?? Future<void>.value()).then((_) async {
+      if (!(await _read()).containsKey(id)) {
+        throw const FormatException('Unknown recording type');
+      }
+      final usage = await _usage();
+      usage[id] = (usage[id] ?? 0) + 1;
+      final file = File(
+        '${(await _file()).parent.path}/recording_type_usage.json',
+      );
+      await file.parent.create(recursive: true);
+      final temporary = File('${file.path}.tmp');
+      await temporary.writeAsString(
+        jsonEncode({'version': 1, 'uses': usage}),
+        flush: true,
+      );
+      await temporary.rename(file.path);
+    });
+    late final Future<void> tail;
+    void release() {
+      if (identical(_usageWrites, tail)) {
+        _usageWrites = null;
+      }
+    }
+
+    tail = operation.then<void>(
+      (_) => release(),
+      onError: (Object _) => release(),
+    );
+    _usageWrites = tail;
+    return operation;
   }
 
   Future<RecordingType> save(

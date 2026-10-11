@@ -21,8 +21,10 @@ class SessionPreferences {
     this.showPosture = true,
     this.eegArtifactScreening = false,
     this.museOpticalCapture = false,
+    this.hiddenInspection = const {'ECG'},
   }) : recording = recording ?? (recordingStreams.keys.toSet()..remove('ecg'));
   final Set<String> recording;
+  final Set<String> hiddenInspection;
   final bool showEeg,
       showOxygen,
       showPosture,
@@ -30,6 +32,7 @@ class SessionPreferences {
       museOpticalCapture;
   SessionPreferences copyWith({
     Set<String>? recording,
+    Set<String>? hiddenInspection,
     bool? showEeg,
     bool? showOxygen,
     bool? showPosture,
@@ -37,6 +40,7 @@ class SessionPreferences {
     bool? museOpticalCapture,
   }) => SessionPreferences(
     recording: recording ?? {...this.recording},
+    hiddenInspection: hiddenInspection ?? {...this.hiddenInspection},
     showEeg: showEeg ?? this.showEeg,
     showOxygen: showOxygen ?? this.showOxygen,
     showPosture: showPosture ?? this.showPosture,
@@ -52,6 +56,7 @@ class SessionPreferences {
     'show_eeg': showEeg,
     'show_oxygen': showOxygen,
     'show_posture': showPosture,
+    'hidden_inspection': hiddenInspection.toList()..sort(),
   };
   factory SessionPreferences.fromJson(Map<String, dynamic> json) {
     if (![1, 2, 3].contains(json['schema_version']) ||
@@ -69,6 +74,11 @@ class SessionPreferences {
                 json['muse_optical_capture'] is! bool))) {
       throw const FormatException('Invalid EEG screening choice');
     }
+    if (json.containsKey('hidden_inspection') &&
+        (json['hidden_inspection'] is! List ||
+            !(json['hidden_inspection'] as List).every((v) => v is String))) {
+      throw const FormatException('Invalid touch readout choices');
+    }
     final selected = (json['recording'] as List).cast<String>().toSet();
     // Version 1 coupled posture logging to acceleration; preserve that choice.
     if (json['schema_version'] == 1 && selected.contains('acc')) {
@@ -79,6 +89,9 @@ class SessionPreferences {
     }
     return SessionPreferences(
       recording: selected,
+      hiddenInspection: json.containsKey('hidden_inspection')
+          ? (json['hidden_inspection'] as List).cast<String>().toSet()
+          : const {'ECG'},
       eegArtifactScreening: json['eeg_artifact_screening'] as bool? ?? false,
       museOpticalCapture: json['muse_optical_capture'] as bool? ?? false,
       showEeg: json['show_eeg'] as bool,

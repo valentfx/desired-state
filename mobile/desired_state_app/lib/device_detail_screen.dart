@@ -204,9 +204,10 @@ class SignalTrend extends StatelessWidget {
         SizedBox(
           height: height,
           width: double.infinity,
-          child: CustomPaint(
+          child: SignalPlot(
             painter: EegAxisPainter(
               plot,
+              timeOrigin: start,
               left: 0,
               right: 60,
               minimum: low - pad,

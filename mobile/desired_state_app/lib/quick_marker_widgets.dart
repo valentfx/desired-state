@@ -243,7 +243,7 @@ class MarkerEventsScreen extends StatelessWidget {
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: controller,
     builder: (context, _) => Scaffold(
-      appBar: AppBar(title: const Text('Session events')),
+      appBar: AppBar(title: const Text('Recording events')),
       body: SafeArea(
         child: ListView(
           children: [
@@ -293,10 +293,21 @@ class _QuickMarkerBarState extends State<QuickMarkerBar> {
     try {
       final marker = await widget.controller.markQuickMarker(item);
       if (!mounted || marker == null) return;
-      ScaffoldMessenger.of(context).removeCurrentSnackBar();
-      if (widget.closeAfterRecord) {
-        Navigator.pop(context);
-      }
+      final messenger = ScaffoldMessenger.of(context);
+      final navigator = Navigator.of(context);
+      final controller = widget.controller;
+      messenger.removeCurrentSnackBar();
+      if (widget.closeAfterRecord) navigator.pop();
+      messenger.showSnackBar(
+        SnackBar(
+          content: const Text('Event saved'),
+          action: SnackBarAction(
+            label: 'Add note',
+            onPressed: () =>
+                showMarkerNote(navigator.context, controller, marker),
+          ),
+        ),
+      );
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

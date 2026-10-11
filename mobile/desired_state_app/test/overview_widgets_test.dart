@@ -155,19 +155,27 @@ void main() {
     );
     expect(find.byType(NavigationRail), findsNothing);
     expect(find.byType(NavigationBar), findsNothing);
-    await openScreen(tester, 'Session');
-    await tester.pumpAndSettle();
+    await openScreen(tester, 'Recording');
+    await settleIo(
+      tester,
+      () => find
+          .widgetWithText(TextField, 'Participant name')
+          .evaluate()
+          .isNotEmpty,
+    );
     await tester.enterText(
       find.widgetWithText(TextField, 'Participant name'),
       'Draft participant',
     );
     await tester.binding.setSurfaceSize(const Size(390, 850));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
     expect(find.byType(NavigationRail), findsNothing);
     expect(find.byType(NavigationBar), findsNothing);
     expect(find.text('Draft participant'), findsOneWidget);
     await openScreen(tester, 'Devices');
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
     expect(find.text('Devices'), findsOneWidget);
     await openScreen(tester, 'Overview');
     await settleIo(
@@ -175,8 +183,14 @@ void main() {
       () => find.byType(CircularProgressIndicator).evaluate().isEmpty,
     );
     expect(find.text('Overview'), findsOneWidget);
-    await openScreen(tester, 'Session');
-    await tester.pumpAndSettle();
+    await openScreen(tester, 'Recording');
+    await settleIo(
+      tester,
+      () => find
+          .widgetWithText(TextField, 'Participant name')
+          .evaluate()
+          .isNotEmpty,
+    );
     expect(find.text('Draft participant'), findsOneWidget);
     expect(controller.participant, 'unassigned');
     expect(tester.takeException(), isNull);

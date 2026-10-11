@@ -16,14 +16,14 @@ void main() {
 
       expect(find.text('Overview'), findsOneWidget);
       expect(find.text('Scan for devices'), findsNothing);
-      await openScreen(tester, 'Session');
+      await openScreen(tester, 'Recording');
       await tester.pump();
       expect(
         find.byWidgetPredicate(
           (widget) =>
               widget is AppBar &&
               widget.title is Text &&
-              (widget.title as Text).data == 'Session',
+              (widget.title as Text).data == 'Recording',
         ),
         findsOneWidget,
       );

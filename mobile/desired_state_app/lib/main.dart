@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
 import 'rr_history.dart';
+import 'plot_inspection.dart';
 import 'session_controller.dart';
 import 'session_logger.dart';
 import 'quick_marker_widgets.dart';
@@ -50,6 +51,14 @@ class _DesiredStateAppState extends State<DesiredStateApp> {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
         useMaterial3: true,
+      ),
+      builder: (context, child) => ListenableBuilder(
+        listenable: _controller,
+        builder: (context, _) => PlotInspectionScope(
+          origin: _controller.plotOrigin,
+          controller: _controller,
+          child: child!,
+        ),
       ),
       home: SessionHome(controller: _controller),
     );
@@ -107,9 +116,9 @@ class _SessionHomeState extends State<SessionHome> {
                 ? (_view.value.$1 == 3
                       ? 'Desired State'
                       : _view.value.$1 == 1
-                      ? 'Session'
+                      ? 'Recording'
                       : 'Screens')
-                : '${_view.value.$1 == 1 || _view.value.$1 == 3 ? 'Session · ' : ''}${widget.controller.recordingState == RecordingState.paused ? 'Paused' : 'Recording'} · ${widget.controller.participant}',
+                : '${widget.controller.recordingState == RecordingState.paused ? 'Paused' : 'Recording'} · ${widget.controller.participant}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
@@ -130,7 +139,7 @@ class _SessionHomeState extends State<SessionHome> {
               ),
               ListTile(
                 leading: const Icon(Icons.monitor_heart_outlined),
-                title: const Text('Session'),
+                title: const Text('Recording'),
                 onTap: () => _select(1),
               ),
               ListTile(
@@ -303,7 +312,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
     context,
     MaterialPageRoute<void>(
       builder: (_) => Scaffold(
-        appBar: AppBar(title: const Text('Session tools')),
+        appBar: AppBar(title: const Text('Recording tools')),
         body: SafeArea(
           child: ListenableBuilder(
             listenable: _controller,
@@ -317,17 +326,6 @@ class _CollectorScreenState extends State<CollectorScreen> {
                 if (_controller.polarId != null) _accLine(),
                 if (_controller.ringId != null) _ringLine(),
                 const SizedBox(height: 16),
-                ListTile(
-                  leading: const Icon(Icons.dashboard_customize_outlined),
-                  title: const Text('Session display settings'),
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute<void>(
-                      builder: (_) =>
-                          PreferencesScreen(controller: _controller),
-                    ),
-                  ),
-                ),
                 if (_sessionLogger != null)
                   ListTile(
                     leading: const Icon(Icons.show_chart),
@@ -604,6 +602,19 @@ class _CollectorScreenState extends State<CollectorScreen> {
             ),
     );
     final startedLogger = _controller.sessionLogger;
+    if (startedLogger != null && !widget.guided && _recordingTypeId != null) {
+      try {
+        await _typeStore.recordUse(_recordingTypeId!);
+        await _loadRecordingTypes();
+      } catch (error) {
+        if (mounted) {
+          setState(
+            () =>
+                _typeError = 'Recording started; type usage not saved: $error',
+          );
+        }
+      }
+    }
     if (startedLogger != null && _controller.participantId != null) {
       try {
         await ParticipantStore(directoryProvider: _controller.directoryProvider)
@@ -813,7 +824,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
     return Scaffold(
       appBar: AppBar(
         toolbarHeight: 36,
-        title: Text(widget.guided ? 'Desired State' : 'Session'),
+        title: Text(widget.guided ? 'Desired State' : 'Recording'),
         actions: [
           IconButton(
             tooltip: 'Device connection',
@@ -822,12 +833,12 @@ class _CollectorScreenState extends State<CollectorScreen> {
           ),
           if (_sessionLogger != null || _lastSessionLogger != null)
             IconButton(
-              tooltip: 'Session notes',
+              tooltip: 'Recording notes',
               icon: const Icon(Icons.edit_note),
               onPressed: _openSessionNotes,
             ),
           IconButton(
-            tooltip: 'Session settings',
+            tooltip: 'Recording settings',
             icon: const Icon(Icons.tune),
             onPressed: () => Navigator.push(
               context,
@@ -862,7 +873,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
     padding: const EdgeInsets.all(20),
     children: [
       Text(
-        widget.guided ? 'Desired State' : 'Session',
+        widget.guided ? 'Desired State' : 'Recording',
         style: Theme.of(context).textTheme.headlineSmall,
       ),
       const SizedBox(height: 12),
@@ -916,7 +927,7 @@ class _CollectorScreenState extends State<CollectorScreen> {
         OutlinedButton.icon(
           onPressed: _controller.busy ? null : _setupSession,
           icon: const Icon(Icons.assignment_outlined),
-          label: const Text('Session setup / starting rating'),
+          label: const Text('Recording setup / starting rating'),
         ),
       SessionTimerSetup(controller: _controller),
       if (_connected) ...[
@@ -977,6 +988,20 @@ class _CollectorScreenState extends State<CollectorScreen> {
           child: ProcessingScreen(
             controller: _controller,
             embedded: true,
+            afterPlot: [
+              QuickMarkerBar(controller: _controller, compact: true),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed:
+                      _controller.busy || _controller.sessionLogger == null
+                      ? null
+                      : () => _rateSession('during'),
+                  icon: const Icon(Icons.sentiment_satisfied_alt),
+                  label: const Text('How do I feel?'),
+                ),
+              ),
+            ],
             header: [
               Wrap(
                 spacing: 12,
@@ -1008,17 +1033,6 @@ class _CollectorScreenState extends State<CollectorScreen> {
                 CompactEegPanel(controller: _controller),
               if (_controller.error != null) Text(_controller.error!),
             ],
-          ),
-        ),
-        QuickMarkerBar(controller: _controller, compact: true),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton.icon(
-            onPressed: _controller.busy || _controller.sessionLogger == null
-                ? null
-                : () => _rateSession('during'),
-            icon: const Icon(Icons.sentiment_satisfied_alt),
-            label: const Text('How do I feel?'),
           ),
         ),
         Row(
@@ -1061,7 +1075,10 @@ class _CollectorScreenState extends State<CollectorScreen> {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text('Session saved', style: Theme.of(context).textTheme.headlineSmall),
+        Text(
+          'Recording saved',
+          style: Theme.of(context).textTheme.headlineSmall,
+        ),
         OutlinedButton.icon(
           onPressed: _controller.busy ? null : () => _rateSession('post'),
           icon: const Icon(Icons.sentiment_satisfied_alt),
@@ -1070,12 +1087,12 @@ class _CollectorScreenState extends State<CollectorScreen> {
         if (widget.guided)
           TextButton(
             onPressed: _setupSession,
-            child: const Text('Setup next session'),
+            child: const Text('Setup next recording'),
           ),
         FilledButton.icon(
           onPressed: _controller.busy ? null : _reviewLastSession,
           icon: const Icon(Icons.analytics_outlined),
-          label: const Text('Analyze session'),
+          label: const Text('Analyze recording'),
         ),
         QuickMarkerBar(controller: _controller, compact: true),
         const SizedBox(height: 8),
@@ -1086,12 +1103,14 @@ class _CollectorScreenState extends State<CollectorScreen> {
         FilledButton.tonalIcon(
           onPressed: _exporting ? null : _exportLastSession,
           icon: const Icon(Icons.ios_share),
-          label: Text(_exporting ? 'PREPARING…' : 'SHARE SESSION'),
+          label: Text(_exporting ? 'PREPARING…' : 'SHARE RECORDING'),
         ),
         const SizedBox(height: 8),
         FilledButton(
-          onPressed: _connected ? _startSession : null,
-          child: const Text('NEW SESSION'),
+          onPressed: _controller.busy
+              ? null
+              : () => setState(() => _showConnect = true),
+          child: const Text('NEW RECORDING'),
         ),
         if (!_connected)
           TextButton(onPressed: _openDevice, child: const Text('Connect H10')),

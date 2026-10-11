@@ -13,6 +13,9 @@ import 'history_plot.dart';
 import 'metric_sensors_panel.dart';
 import 'eeg_live_panel.dart';
 import 'eeg_saved_screen.dart';
+import 'plot_inspection.dart';
+import 'inspection_samples.dart';
+import 'preferences_screen.dart';
 
 /// One configurable view for live inputs and reopened immutable session rows.
 class ProcessingScreen extends StatefulWidget {
@@ -23,9 +26,10 @@ class ProcessingScreen extends StatefulWidget {
     this.repository,
     this.embedded = false,
     this.header = const [],
+    this.afterPlot = const [],
   });
   final bool embedded;
-  final List<Widget> header;
+  final List<Widget> header, afterPlot;
   final SessionController controller;
   final HistorySession? session;
   final SessionHistoryRepository? repository;
@@ -34,6 +38,7 @@ class ProcessingScreen extends StatefulWidget {
 }
 
 class _ProcessingScreenState extends State<ProcessingScreen> {
+  Map<String, List<InspectionValue>> _inspectionSamples = {};
   bool _ready = false, _follow = true, _saving = false, _compareRr = false;
   String? _notice;
   String? _error, _configuration, _sessionId;
@@ -67,6 +72,14 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
     }
     _ready = widget.controller.processing.ready;
     _load();
+    final session = widget.session;
+    if (session != null) {
+      loadInspectionSamples(session.entry)
+          .then((samples) {
+            if (mounted) setState(() => _inspectionSamples = samples);
+          })
+          .catchError((Object _) {});
+    }
   }
 
   void _changed() {
@@ -96,6 +109,15 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
   }
 
   Future<void> _settings() async {
+    if (widget.session == null) {
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => PreferencesScreen(controller: widget.controller),
+        ),
+      );
+      return;
+    }
     final config = await Navigator.push<ProcessingConfig>(
       context,
       MaterialPageRoute(
@@ -237,6 +259,34 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
               : clamp(end.subtract(Duration(seconds: _preset!))))
         : clamp(_left ?? first);
     final latest = processor.results.isEmpty ? null : processor.results.last;
+    final origin = widget.session?.entry.started ?? controller.plotOrigin;
+    final parentInspection = PlotInspectionScope.of(context);
+    final inspectionTime = parentInspection == null
+        ? _overlayCursor
+        : parentInspection.selection.time;
+    Map<String, InspectionValue?> inspectValues(DateTime time) => {
+      if (widget.session == null) ...liveInspectionValues(controller, time),
+      if (widget.session != null)
+        ...inspectionSamplesAt(_inspectionSamples, time),
+      'BPM': nearestInspection(hr, time, 'bpm'),
+      for (final metric in {...config.metrics, 'RMSSD'}.where((m) => m != 'HR'))
+        inspectionKey(metric): nearestInspection(
+          [
+            for (final r in processor.results)
+              HistoryPoint(r.input.time, r.values[metric], r.plotSegment),
+          ],
+          time,
+          _unit(metric),
+        ),
+    };
+    Widget scope(Widget child) => PlotInspectionScope(
+      saved: widget.session != null,
+      origin: origin,
+      controller: controller,
+      valuesAt: inspectValues,
+      child: child,
+    );
+
     if (widget.embedded && _ready) {
       final series = <String, List<HistoryPoint>>{
         for (final metric in config.metrics)
@@ -256,11 +306,11 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
             .toList();
         final summary = MetricSummary(visible.map((p) => p.value));
         HistoryPoint? selected;
-        if (_overlayCursor != null && visible.isNotEmpty) {
+        if (inspectionTime != null && visible.isNotEmpty) {
           selected = visible.reduce(
             (a, b) =>
-                a.time.difference(_overlayCursor!).abs() <=
-                    b.time.difference(_overlayCursor!).abs()
+                a.time.difference(inspectionTime).abs() <=
+                    b.time.difference(inspectionTime).abs()
                 ? a
                 : b,
           );
@@ -312,14 +362,10 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
             Row(
               children: [
                 Expanded(
-                  child: TextButton.icon(
-                    onPressed: _saving ? null : _settings,
-                    icon: const Icon(Icons.tune, size: 18),
-                    label: Text(
-                      'Filters & metrics: ${config.mode.name}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                  child: Text(
+                    'H10 · ${config.mode.name}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 DropdownButton<int>(
@@ -383,6 +429,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
               Text(_error!, maxLines: 2, overflow: TextOverflow.ellipsis),
             Expanded(
               child: RelativeOverlayPlot(
+                origin: origin,
                 series: series,
                 colors: {
                   for (final metric in series.keys) metric: _color(metric),
@@ -390,7 +437,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                 start: start,
                 end: end,
                 events: events,
-                cursor: _overlayCursor,
+                cursor: inspectionTime,
                 onPan: (fraction) => navigate(shift: -fraction),
                 onInspect: (time) => setState(() {
                   _overlayCursor = time;
@@ -401,9 +448,9 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
               ),
             ),
             Text(
-              _overlayCursor == null
+              inspectionTime == null
                   ? '${start.toLocal().toString().substring(11, 19)} - ${end.toLocal().toString().substring(11, 19)}'
-                  : 'Inspecting ${_overlayCursor!.toLocal()} (nearest samples)',
+                  : 'Inspecting ${inspectionTime.toLocal()} (nearest samples)',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 11),
@@ -412,50 +459,53 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
           ],
         ),
       );
-      return ListView(
-        padding: const EdgeInsets.all(8),
-        children: [
-          ...widget.header,
-          panel(
-            310.0 +
-                (summaries.length - 2).clamp(0, 99) * 24 +
-                (MediaQuery.textScalerOf(context).scale(14) - 14) * 12,
-          ),
-          ExpansionTile(
-            title: const Text('Metric details'),
-            subtitle: const Text(
-              'Native units · numeric axes · visible min/max',
+      return scope(
+        ListView(
+          padding: const EdgeInsets.all(8),
+          children: [
+            ...widget.header,
+            panel(
+              310.0 +
+                  (summaries.length - 2).clamp(0, 99) * 24 +
+                  (MediaQuery.textScalerOf(context).scale(14) - 14) * 12,
             ),
-            children: [
-              _appliedStatus(config),
-              for (final entry in series.entries)
-                HistoryPlot(
-                  title: entry.key == 'HR' ? 'Heart rate' : entry.key,
-                  unit: _unit(entry.key),
-                  points: entry.value,
-                  start: start,
-                  end: end,
-                  events: events,
-                  color: _color(entry.key),
-                  cursor: _overlayCursor,
-                  onInspect: (point) => setState(() {
-                    _overlayCursor = point.time;
-                    _follow = false;
-                    _left = start;
-                    _right = end;
-                  }),
-                ),
-              if (widget.session == null)
-                MetricSensorsPanel(controller: widget.controller),
-              const Padding(
-                padding: EdgeInsets.all(12),
-                child: Text(
-                  'Select HRV values in Filters & metrics. Saving ECG, acceleration and posture is controlled independently in Settings → Recording settings.',
-                ),
+            ...widget.afterPlot,
+            ExpansionTile(
+              title: const Text('Metric details'),
+              subtitle: const Text(
+                'Native units · numeric axes · visible min/max',
               ),
-            ],
-          ),
-        ],
+              children: [
+                _appliedStatus(config),
+                for (final entry in series.entries)
+                  HistoryPlot(
+                    title: entry.key == 'HR' ? 'Heart rate' : entry.key,
+                    unit: _unit(entry.key),
+                    points: entry.value,
+                    start: start,
+                    end: end,
+                    events: events,
+                    color: _color(entry.key),
+                    cursor: inspectionTime,
+                    onInspect: (point) => setState(() {
+                      _overlayCursor = point.time;
+                      _follow = false;
+                      _left = start;
+                      _right = end;
+                    }),
+                  ),
+                if (widget.session == null)
+                  MetricSensorsPanel(controller: widget.controller),
+                const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: Text(
+                    'Select H10 plot metrics and filters in the upper-right Recording settings. Saving ECG, acceleration and posture is controlled independently in Settings → Recording settings.',
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       );
     }
     final content = SafeArea(
@@ -736,7 +786,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
             ),
     );
     if (widget.embedded) {
-      return content;
+      return scope(content);
     }
     return Scaffold(
       appBar: AppBar(
@@ -749,7 +799,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
           ),
         ],
       ),
-      body: content,
+      body: scope(content),
     );
   }
 
@@ -831,9 +881,10 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
         SizedBox(
           height: 180,
           width: double.infinity,
-          child: CustomPaint(
+          child: SignalPlot(
             painter: EegAxisPainter(
               series,
+              timeOrigin: start,
               left: 0,
               right: end.difference(start).inMicroseconds / 1000000 + .001,
               minimum: low - padding,
@@ -874,7 +925,17 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
 }
 
 class ProcessingEditor extends StatefulWidget {
-  const ProcessingEditor({super.key, required this.config, this.presets});
+  const ProcessingEditor({
+    super.key,
+    required this.config,
+    this.presets,
+    this.title = 'Processing settings',
+    this.extraChildren = const [],
+    this.onApply,
+  });
+  final String title;
+  final List<Widget> extraChildren;
+  final Future<void> Function(ProcessingConfig)? onApply;
   final ProcessingPresets? presets;
   final ProcessingConfig config;
   @override
@@ -932,11 +993,19 @@ class _ProcessingEditorState extends State<ProcessingEditor> {
     return config;
   }
 
-  void _save() {
+  Future<void> _save() async {
     try {
-      Navigator.pop(context, _read());
+      final config = _read();
+      if (widget.onApply != null) {
+        setState(() => _busy = true);
+        await widget.onApply!(config);
+      } else {
+        Navigator.pop(context, config);
+      }
     } catch (e) {
-      setState(() => _error = 'Invalid settings: $e');
+      if (mounted) setState(() => _error = 'Settings not saved: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -1074,7 +1143,7 @@ class _ProcessingEditorState extends State<ProcessingEditor> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
-      title: const Text('Processing settings'),
+      title: Text(widget.title),
       actions: [
         TextButton(
           onPressed: _busy ? null : _save,
@@ -1086,6 +1155,7 @@ class _ProcessingEditorState extends State<ProcessingEditor> {
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          ...widget.extraChildren,
           if (_error != null) Text(_error!),
           const Text(
             'Applies to the whole derived view and future defaults for Live and History. Raw recordings and v1 recorded flags stay unchanged.',
@@ -1122,7 +1192,7 @@ class _ProcessingEditorState extends State<ProcessingEditor> {
               ),
             ],
           ),
-          const ListTile(title: Text('Basic settings')),
+          const ListTile(title: Text('H10 filters & plot metrics')),
           DropdownButton<AnalysisMode>(
             value: _mode,
             isExpanded: true,
@@ -1153,7 +1223,11 @@ class _ProcessingEditorState extends State<ProcessingEditor> {
                   label: Text(metric),
                   selected: _metrics.contains(metric),
                   onSelected: (selected) => setState(() {
-                    selected ? _metrics.add(metric) : _metrics.remove(metric);
+                    if (selected) {
+                      _metrics.add(metric);
+                    } else if (_metrics.length > 1) {
+                      _metrics.remove(metric);
+                    }
                     _presetName = 'Current / modified';
                   }),
                 ),

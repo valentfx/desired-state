@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -6,6 +7,54 @@ import 'package:desired_state_app/recording_types.dart';
 import 'package:desired_state_app/state_feedback.dart';
 
 void main() {
+  test(
+    'completed usage write does not retain an earlier event-loop zone',
+    () async {
+      final root = await Directory.systemTemp.createTemp('recording-zone-');
+      final store = RecordingTypeStore(directoryProvider: () async => root);
+      var retired = false;
+      try {
+        await runZoned(
+          () => store.recordUse('sleep'),
+          zoneSpecification: ZoneSpecification(
+            scheduleMicrotask: (self, parent, zone, callback) {
+              if (!retired) parent.scheduleMicrotask(zone, callback);
+            },
+          ),
+        );
+        retired = true;
+        final types = await store.list().timeout(const Duration(seconds: 2));
+        expect(types.keys.first, 'sleep');
+      } finally {
+        await root.delete(recursive: true);
+      }
+    },
+  );
+
+  test('recording popularity survives rename and restart without changing snapshots', () async {
+    final root = await Directory.systemTemp.createTemp('recording-popularity-');
+    try {
+      final store = RecordingTypeStore(directoryProvider: () async => root);
+      await store.recordUse('meditation');
+      await store.recordUse('meditation');
+      await store.recordUse('sleep');
+      await store.save(
+        'Quiet practice',
+        'Renamed definition',
+        id: 'meditation',
+      );
+      final reopened = RecordingTypeStore(directoryProvider: () async => root);
+      expect((await reopened.list()).keys.first, 'meditation');
+      expect((await reopened.list())['meditation']!.name, 'Quiet practice');
+      expect((await reopened.list())['meditation']!.version, 2);
+      final usage = File('${root.path}/recording_type_usage.json');
+      await usage.writeAsString('{bad');
+      await expectLater(reopened.recordUse('sleep'), throwsFormatException);
+      expect(await usage.readAsString(), '{bad');
+    } finally {
+      await root.delete(recursive: true);
+    }
+  });
   test(
     'custom type revisions and archive retain the captured definition',
     () async {

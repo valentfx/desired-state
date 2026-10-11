@@ -9,6 +9,9 @@ import 'session_history.dart';
 import 'session_analysis.dart';
 import 'signal_review.dart';
 import 'session_controller.dart';
+import 'plot_inspection.dart';
+import 'inspection_samples.dart';
+import 'recording_presentation.dart';
 
 class SessionReviewScreen extends StatefulWidget {
   const SessionReviewScreen({
@@ -20,8 +23,10 @@ class SessionReviewScreen extends StatefulWidget {
     this.controller,
     this.onLive,
     this.embedded = false,
+    this.onEditEvent,
   });
   final SessionController? controller;
+  final Future<void> Function(String)? onEditEvent;
   final bool embedded;
   final VoidCallback? onLive;
   final HistorySession session;
@@ -34,6 +39,19 @@ class SessionReviewScreen extends StatefulWidget {
 }
 
 class _SessionReviewScreenState extends State<SessionReviewScreen> {
+  SignalReview? _inspectionSignals;
+  ReplayReview? _inspectionReplay;
+  Map<String, List<InspectionValue>> _inspectionSamples = {};
+  @override
+  void initState() {
+    super.initState();
+    loadInspectionSamples(widget.session.entry)
+        .then((samples) {
+          if (mounted) setState(() => _inspectionSamples = samples);
+        })
+        .catchError((Object _) {});
+  }
+
   late final _origin = widget.session.entry.started ?? DateTime(1970);
   late double _duration = _sessionDuration();
   late RangeValues _range = RangeValues(0, _duration);
@@ -43,17 +61,23 @@ class _SessionReviewScreenState extends State<SessionReviewScreen> {
   String? _channel, _notice;
   String _eegUnits = 'dB';
   double _replayStart = 0;
+  DateTime? _lastSelection;
   late List<HrvBlock> _blocks = hrvBlocks(widget.session, _hrvSeconds);
   late Future<SignalReview> _signals = _loadSignals();
   late Future<ReplayReview> _replay = _readReplay(0, math.min(10.0, _duration));
-  Future<ReplayReview> _readReplay(double start, double end) =>
-      widget.replayLoader != null
-      ? widget.replayLoader!(widget.session.entry, start, end)
-      : replaySignals(widget.session.entry, start, end);
+  Future<ReplayReview> _readReplay(double start, double end) async {
+    final result = await (widget.replayLoader != null
+        ? widget.replayLoader!(widget.session.entry, start, end)
+        : replaySignals(widget.session.entry, start, end));
+    _inspectionReplay = result;
+    return result;
+  }
+
   Future<SignalReview> _loadSignals() async {
     final result = await (widget.signalLoader != null
         ? widget.signalLoader!(widget.session.entry, _eegSeconds)
         : reviewSignals(widget.session.entry, eegSeconds: _eegSeconds));
+    _inspectionSignals = result;
     if (mounted && result.endTime != null) {
       final seconds =
           result.endTime!.difference(_origin).inMicroseconds / 1000000;
@@ -150,9 +174,10 @@ class _SessionReviewScreenState extends State<SessionReviewScreen> {
         SizedBox(
           height: 220,
           width: double.infinity,
-          child: CustomPaint(
+          child: SignalPlot(
             painter: EegAxisPainter(
               series,
+              timeOrigin: _origin,
               left: left ?? _range.start,
               right: math.max(
                 (left ?? _range.start) + .001,
@@ -349,249 +374,285 @@ class _SessionReviewScreenState extends State<SessionReviewScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: widget.embedded
-        ? null
-        : AppBar(title: const Text('Session analysis')),
-    body: FutureBuilder<SignalReview>(
-      future: _signals,
-      builder: (context, snapshot) {
-        final signals = snapshot.data;
-        final start = _time(_range.start), end = _time(_range.end);
-        final hr = widget.session.hr
-            .where((p) => !p.time.isBefore(start) && !p.time.isAfter(end))
-            .toList();
-        final hrSummary = MetricSummary(hr.map((p) => p.value));
-        final selected = _blocks
-            .where((b) => !b.start.isBefore(start) && !b.end.isAfter(end))
-            .toList();
-        final qualified = selected.where((b) => b.ready).toList();
-        final total = selected.fold<int>(0, (s, b) => s + b.total);
-        final usable = selected.fold<int>(0, (s, b) => s + b.usable);
-        return ListView(
-          padding: const EdgeInsets.all(12),
-          children: [
-            if (widget.controller != null)
-              ListenableBuilder(
-                listenable: widget.controller!,
-                builder: (context, _) =>
-                    widget.controller!.sessionLogger == null
-                    ? const SizedBox.shrink()
-                    : ListTile(
-                        title: Text(
-                          widget.controller!.recordingState ==
-                                  RecordingState.paused
-                              ? 'Recording paused in Session'
-                              : 'Recording continues in Session',
-                        ),
-                        trailing: TextButton(
-                          onPressed:
-                              widget.onLive ??
-                              () => Navigator.popUntil(
-                                context,
-                                (route) => route.isFirst,
-                              ),
-                          child: const Text('Session'),
-                        ),
-                      ),
-              ),
-            Text(
-              widget.session.entry.participant,
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            Text(widget.session.entry.id),
-            const Text(
-              'Descriptive review. Original recordings stay unchanged. HRV is screened device RR, not ECG-verified normal beats. Breathing, posture and movement need context.',
-            ),
-            const Text(
-              'Timeline uses session seconds and phone receipt alignment. EEG/ECG device clocks are not synchronized; fine cross-device timing cannot be inferred.',
-            ),
-            const SizedBox(height: 12),
-            Text('Viewing ${_interval(_range)}'),
-            RangeSlider(
-              min: 0,
-              max: _duration,
-              values: _range,
-              onChanged: (v) {
-                if (v.end - v.start < .1) {
-                  return;
-                }
-                setState(() => _range = v);
-              },
-              onChangeEnd: (_) => setState(_loadReplay),
-            ),
-            Wrap(
-              spacing: 8,
-              children: [
-                for (final seconds in [60, 300, 900, 0])
-                  TextButton(
-                    onPressed: () => setState(() {
-                      _range = RangeValues(
-                        0,
-                        seconds == 0
-                            ? _duration
-                            : math.min(seconds.toDouble(), _duration),
-                      );
-                      _loadReplay();
-                    }),
-                    child: Text(seconds == 0 ? 'All' : '${seconds}s'),
-                  ),
-              ],
-            ),
-            ExpansionTile(
-              initiallyExpanded: true,
-              title: const Text('H10 analysis overview'),
+  Widget build(BuildContext context) {
+    final selected = PlotInspectionScope.of(context)?.selection.time;
+    if (selected != null && selected != _lastSelection) {
+      _lastSelection = selected;
+      final seconds = selected.difference(_origin).inMicroseconds / 1000000;
+      if (seconds >= 0 &&
+          (seconds < _replayStart || seconds > _replayStart + 10)) {
+        _replayStart = math.max(0.0, seconds - 5);
+        _replay = _readReplay(_replayStart, _replayStart + 10);
+      }
+    }
+    return PlotInspectionScope(
+      saved: true,
+      origin: _origin,
+      controller:
+          widget.controller ?? PlotInspectionScope.of(context)?.controller,
+      valuesAt: (time) => {
+        ...inspectionSamplesAt(_inspectionSamples, time),
+        'BPM': nearestInspection(widget.session.hr, time, 'bpm'),
+        // Block RMSSD belongs to an interval, rather than an instantaneous sample.
+        'HRV': _blockInspection(time),
+        for (final band in ['Alpha', 'Beta', 'Theta', 'Delta', 'Gamma'])
+          band: nearestInspection(
+            [
+              for (final b in _inspectionSignals?.bands ?? <SavedBand>[])
+                HistoryPoint(
+                  b.frame.time,
+                  b.frame.values(
+                    _channel,
+                    relative: _eegUnits == '%',
+                    decibels: _eegUnits == 'dB',
+                    artifactScreening: _eegScreening,
+                  )[band],
+                  b.segment,
+                ),
+            ],
+            time,
+            _eegUnits,
+          ),
+        'ECG': nearestInspection(
+          [
+            for (final points
+                in _inspectionReplay?.ecg.values ?? <List<(double, double)>>[])
+              for (final p in points) HistoryPoint(_time(p.$1), p.$2, 0),
+          ],
+          time,
+          'µV',
+          tolerance: const Duration(milliseconds: 100),
+        ),
+      },
+      child: Scaffold(
+        appBar: widget.embedded
+            ? null
+            : AppBar(title: const Text('Recording analysis')),
+        body: FutureBuilder<SignalReview>(
+          future: _signals,
+          builder: (context, snapshot) {
+            final signals = snapshot.data;
+            final start = _time(_range.start), end = _time(_range.end);
+            final hr = widget.session.hr
+                .where((p) => !p.time.isBefore(start) && !p.time.isAfter(end))
+                .toList();
+            final hrSummary = MetricSummary(hr.map((p) => p.value));
+            final selected = _blocks
+                .where((b) => !b.start.isBefore(start) && !b.end.isAfter(end))
+                .toList();
+            final qualified = selected.where((b) => b.ready).toList();
+            final total = selected.fold<int>(0, (s, b) => s + b.total);
+            final usable = selected.fold<int>(0, (s, b) => s + b.usable);
+            return ListView(
+              padding: const EdgeInsets.all(12),
               children: [
                 Text(
-                  'Mean device HR ${hrSummary.average?.toStringAsFixed(1) ?? '--'} bpm · min ${hrSummary.minimum?.toStringAsFixed(1) ?? '--'} / max ${hrSummary.maximum?.toStringAsFixed(1) ?? '--'} · ${hrSummary.count} measurements',
+                  widget.session.entry.participant,
+                  style: Theme.of(context).textTheme.titleLarge,
                 ),
-                Text(
-                  '$usable/$total RR accepted within complete selected windows. Acceptance is a sample fraction, not measured time coverage.',
-                ),
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    for (final seconds in [60, 300])
-                      ChoiceChip(
-                        label: Text('${seconds}s RR windows'),
-                        selected: _hrvSeconds == seconds,
-                        onSelected: (_) => setState(() {
-                          _hrvSeconds = seconds;
-                          _blocks = hrvBlocks(widget.session, seconds);
-                          _baseline = RangeValues(
-                            0,
-                            math.min(seconds.toDouble(), _duration),
-                          );
-                        }),
-                      ),
-                  ],
-                ),
-                if (qualified.isNotEmpty)
-                  Text(
-                    'Latest qualified window: ${qualified.last.start.toLocal()} to ${qualified.last.end.toLocal()}',
-                  ),
-                if (qualified.isNotEmpty)
-                  Wrap(
-                    spacing: 12,
-                    children: [
-                      for (final name in ['RMSSD', 'SDNN', 'pNN50', 'lnRMSSD'])
-                        Text(
-                          '$name ${qualified.last.metrics[name]?.toStringAsFixed(2) ?? '--'} ${name == 'pNN50'
-                              ? '%'
-                              : name == 'lnRMSSD'
-                              ? 'ln(ms)'
-                              : 'ms'}',
-                        ),
-                    ],
-                  ),
-                for (final observation in h10Observations(
-                  _blocks,
-                  start,
-                  end,
-                  _time(_baseline.start),
-                  _time(_baseline.end),
-                ))
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Text(observation),
-                  ),
+                Text(recordingTitle(widget.session.entry)),
                 const Text(
-                  'Provisional window checks: ≥30 usable RR, ≥20 adjacent pairs, ≥80% acceptance/receipt span; RR-duration estimate 80–120% of window and one continuity segment. These are engineering checks, not clinically validated confidence.',
+                  'Descriptive review. Original recordings stay unchanged. HRV is screened device RR, not ECG-verified normal beats. Breathing, posture and movement need context.',
                 ),
-              ],
-            ),
-            ExpansionTile(
-              title: const Text('Baseline interval'),
-              children: [
-                Text(_interval(_baseline)),
+                const Text(
+                  'Timeline uses session seconds and phone receipt alignment. EEG/ECG device clocks are not synchronized; fine cross-device timing cannot be inferred.',
+                ),
+                const SizedBox(height: 12),
+                Text('Viewing ${_interval(_range)}'),
                 RangeSlider(
                   min: 0,
                   max: _duration,
-                  values: _baseline,
+                  values: _range,
                   onChanged: (v) {
-                    if (v.end - v.start >= .1) {
-                      setState(() => _baseline = v);
+                    if (v.end - v.start < .1) {
+                      return;
                     }
+                    setState(() => _range = v);
                   },
+                  onChangeEnd: (_) => setState(_loadReplay),
                 ),
-                const Text(
-                  'HRV comparison uses the last qualified full window in this baseline interval and the last separate qualified window in the view. EEG baseline averages usable band windows in this interval; no eye/muscle artifact guarantee.',
-                ),
-              ],
-            ),
-            ExpansionTile(
-              title: const Text('Shared timeline · HR & HRV'),
-              children: [
-                _plot('Heart rate', {
-                  'HR': [
-                    for (final p in hr)
-                      (
-                        p.time.difference(_origin).inMicroseconds / 1000000,
-                        p.value ?? double.nan,
-                      ),
-                  ],
-                }, 'bpm'),
-                _plot('RMSSD windows', {'RMSSD': _metricPoints('RMSSD')}, 'ms'),
-                _plot('SDNN windows', {'SDNN': _metricPoints('SDNN')}, 'ms'),
-                const Text(
-                  'HRV points represent separate complete windows. EEG below uses this same time range; purple lines mark session/practice events. Gaps remain unavailable.',
-                ),
-              ],
-            ),
-            ExpansionTile(
-              title: const Text('EEG post-processing'),
-              children: [
-                if (snapshot.connectionState != ConnectionState.done)
-                  const LinearProgressIndicator(),
-                if (snapshot.hasError)
-                  Text('EEG review failed: ${snapshot.error}'),
                 Wrap(
                   spacing: 8,
                   children: [
-                    for (final seconds in [2, 4])
-                      ChoiceChip(
-                        label: Text('${seconds}s EEG window'),
-                        selected: _eegSeconds == seconds,
-                        onSelected: (_) => setState(() {
-                          _eegSeconds = seconds;
-                          _signals = _loadSignals();
+                    for (final seconds in [60, 300, 900, 0])
+                      TextButton(
+                        onPressed: () => setState(() {
+                          _range = RangeValues(
+                            0,
+                            seconds == 0
+                                ? _duration
+                                : math.min(seconds.toDouble(), _duration),
+                          );
+                          _loadReplay();
                         }),
+                        child: Text(seconds == 0 ? 'All' : '${seconds}s'),
                       ),
                   ],
                 ),
-                if (signals != null) _eegContent(signals),
-              ],
-            ),
-            ExpansionTile(
-              title: const Text('Raw ECG & EEG replay'),
-              children: [
-                Text(
-                  '10-second excerpt starting ${_replayStart.toStringAsFixed(1)} seconds after session start',
+                ExpansionTile(
+                  initiallyExpanded: true,
+                  title: const Text('H10 analysis overview'),
+                  children: [
+                    Text(
+                      'Mean device HR ${hrSummary.average?.toStringAsFixed(1) ?? '--'} bpm · min ${hrSummary.minimum?.toStringAsFixed(1) ?? '--'} / max ${hrSummary.maximum?.toStringAsFixed(1) ?? '--'} · ${hrSummary.count} measurements',
+                    ),
+                    Text(
+                      '$usable/$total RR accepted within complete selected windows. Acceptance is a sample fraction, not measured time coverage.',
+                    ),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        for (final seconds in [60, 300])
+                          ChoiceChip(
+                            label: Text('${seconds}s RR windows'),
+                            selected: _hrvSeconds == seconds,
+                            onSelected: (_) => setState(() {
+                              _hrvSeconds = seconds;
+                              _blocks = hrvBlocks(widget.session, seconds);
+                              _baseline = RangeValues(
+                                0,
+                                math.min(seconds.toDouble(), _duration),
+                              );
+                            }),
+                          ),
+                      ],
+                    ),
+                    if (qualified.isNotEmpty)
+                      Text(
+                        'Latest qualified window: ${qualified.last.start.toLocal()} to ${qualified.last.end.toLocal()}',
+                      ),
+                    if (qualified.isNotEmpty)
+                      Wrap(
+                        spacing: 12,
+                        children: [
+                          for (final name in [
+                            'RMSSD',
+                            'SDNN',
+                            'pNN50',
+                            'lnRMSSD',
+                          ])
+                            Text(
+                              '$name ${qualified.last.metrics[name]?.toStringAsFixed(2) ?? '--'} ${name == 'pNN50'
+                                  ? '%'
+                                  : name == 'lnRMSSD'
+                                  ? 'ln(ms)'
+                                  : 'ms'}',
+                            ),
+                        ],
+                      ),
+                    for (final observation in h10Observations(
+                      _blocks,
+                      start,
+                      end,
+                      _time(_baseline.start),
+                      _time(_baseline.end),
+                    ))
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Text(observation),
+                      ),
+                    const Text(
+                      'Provisional window checks: ≥30 usable RR, ≥20 adjacent pairs, ≥80% acceptance/receipt span; RR-duration estimate 80–120% of window and one continuity segment. These are engineering checks, not clinically validated confidence.',
+                    ),
+                  ],
                 ),
-                Slider(
-                  min: _range.start,
-                  max: math.max(_range.start + .001, _range.end - 10),
-                  value: _replayStart
-                      .clamp(
-                        _range.start,
-                        math.max(_range.start + .001, _range.end - 10),
-                      )
-                      .toDouble(),
-                  onChanged: (v) => setState(() => _replayStart = v),
-                  onChangeEnd: (_) => setState(_loadReplay),
+                ExpansionTile(
+                  title: const Text('Baseline interval'),
+                  children: [
+                    Text(_interval(_baseline)),
+                    RangeSlider(
+                      min: 0,
+                      max: _duration,
+                      values: _baseline,
+                      onChanged: (v) {
+                        if (v.end - v.start >= .1) {
+                          setState(() => _baseline = v);
+                        }
+                      },
+                    ),
+                    const Text(
+                      'HRV comparison uses the last qualified full window in this baseline interval and the last separate qualified window in the view. EEG baseline averages usable band windows in this interval; no eye/muscle artifact guarantee.',
+                    ),
+                  ],
                 ),
-                FutureBuilder<ReplayReview>(
-                  future: _replay,
-                  builder: (context, replay) {
-                    if (replay.hasError) {
-                      return Text('Replay failed: ${replay.error}');
-                    }
-                    if (!replay.hasData) {
-                      return const LinearProgressIndicator();
-                    }
-                    final data = replay.data!;
-                    double extent(Map<String, List<(double, double)>> series) =>
-                        math.max(
+                ExpansionTile(
+                  title: const Text('Shared timeline · HR & HRV'),
+                  children: [
+                    _plot('Heart rate', {
+                      'HR': [
+                        for (final p in hr)
+                          (
+                            p.time.difference(_origin).inMicroseconds / 1000000,
+                            p.value ?? double.nan,
+                          ),
+                      ],
+                    }, 'bpm'),
+                    _plot('RMSSD windows', {
+                      'RMSSD': _metricPoints('RMSSD'),
+                    }, 'ms'),
+                    _plot('SDNN windows', {
+                      'SDNN': _metricPoints('SDNN'),
+                    }, 'ms'),
+                    const Text(
+                      'HRV points represent separate complete windows. EEG below uses this same time range; purple lines mark session/practice events. Gaps remain unavailable.',
+                    ),
+                  ],
+                ),
+                ExpansionTile(
+                  title: const Text('EEG post-processing'),
+                  children: [
+                    if (snapshot.connectionState != ConnectionState.done)
+                      const LinearProgressIndicator(),
+                    if (snapshot.hasError)
+                      Text('EEG review failed: ${snapshot.error}'),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        for (final seconds in [2, 4])
+                          ChoiceChip(
+                            label: Text('${seconds}s EEG window'),
+                            selected: _eegSeconds == seconds,
+                            onSelected: (_) => setState(() {
+                              _eegSeconds = seconds;
+                              _signals = _loadSignals();
+                            }),
+                          ),
+                      ],
+                    ),
+                    if (signals != null) _eegContent(signals),
+                  ],
+                ),
+                ExpansionTile(
+                  title: const Text('Raw ECG & EEG replay'),
+                  children: [
+                    Text(
+                      '10-second excerpt starting ${_replayStart.toStringAsFixed(1)} seconds after session start',
+                    ),
+                    Slider(
+                      min: _range.start,
+                      max: math.max(_range.start + .001, _range.end - 10),
+                      value: _replayStart
+                          .clamp(
+                            _range.start,
+                            math.max(_range.start + .001, _range.end - 10),
+                          )
+                          .toDouble(),
+                      onChanged: (v) => setState(() => _replayStart = v),
+                      onChangeEnd: (_) => setState(_loadReplay),
+                    ),
+                    FutureBuilder<ReplayReview>(
+                      future: _replay,
+                      builder: (context, replay) {
+                        if (replay.hasError) {
+                          return Text('Replay failed: ${replay.error}');
+                        }
+                        if (!replay.hasData) {
+                          return const LinearProgressIndicator();
+                        }
+                        final data = replay.data!;
+                        double extent(
+                          Map<String, List<(double, double)>> series,
+                        ) => math.max(
                           1.0,
                           series.values
                                   .expand((p) => p)
@@ -600,76 +661,111 @@ class _SessionReviewScreenState extends State<SessionReviewScreen> {
                                   .fold<double>(0, math.max) *
                               1.1,
                         );
-                    return Column(
-                      children: [
-                        _plot(
-                          'Raw ECG',
-                          data.ecg,
-                          'µV',
-                          minimum: -extent(data.ecg),
-                          maximum: extent(data.ecg),
-                          left: _replayStart,
-                          right: math.min(_range.end, _replayStart + 10),
-                        ),
-                        _plot(
-                          'Raw EEG',
-                          data.eeg,
-                          'µV',
-                          minimum: -extent(data.eeg),
-                          maximum: extent(data.eeg),
-                          left: _replayStart,
-                          right: math.min(_range.end, _replayStart + 10),
-                        ),
-                        for (final warning in data.warnings) Text(warning),
-                      ],
-                    );
-                  },
-                ),
-                const Text(
-                  'ECG is displayed from recorded PMD frames. Automatic ECG beat detection and ECG-based HRV are not implemented; device RR remains the HRV source.',
-                ),
-              ],
-            ),
-            ExpansionTile(
-              title: const Text('Markers, practice & session events'),
-              children: [
-                for (final event in widget.session.entry.events.where((e) {
-                  final time = DateTime.tryParse('${e['received_utc']}');
-                  return time != null &&
-                      !time.isBefore(start) &&
-                      !time.isAfter(end) &&
-                      (e['event'] == 'marked_event' ||
-                          '${e['event']}'.startsWith('practice_') ||
-                          e['event'] == 'session_paused' ||
-                          e['event'] == 'session_resumed');
-                }))
-                  ListTile(
-                    title: Text(
-                      '${event['event']} · ${event['marker_label'] ?? event['description'] ?? ''}',
+                        return Column(
+                          children: [
+                            _plot(
+                              'Raw ECG',
+                              data.ecg,
+                              'µV',
+                              minimum: -extent(data.ecg),
+                              maximum: extent(data.ecg),
+                              left: _replayStart,
+                              right: math.min(_range.end, _replayStart + 10),
+                            ),
+                            _plot(
+                              'Raw EEG',
+                              data.eeg,
+                              'µV',
+                              minimum: -extent(data.eeg),
+                              maximum: extent(data.eeg),
+                              left: _replayStart,
+                              right: math.min(_range.end, _replayStart + 10),
+                            ),
+                            for (final warning in data.warnings) Text(warning),
+                          ],
+                        );
+                      },
                     ),
-                    subtitle: Text('${event['received_utc']}'),
-                  ),
+                    const Text(
+                      'ECG is displayed from recorded PMD frames. Automatic ECG beat detection and ECG-based HRV are not implemented; device RR remains the HRV source.',
+                    ),
+                  ],
+                ),
+                ExpansionTile(
+                  title: const Text('Markers, practice & session events'),
+                  children: [
+                    for (final event in widget.session.entry.events.where((e) {
+                      final time = DateTime.tryParse('${e['received_utc']}');
+                      return time != null &&
+                          !time.isBefore(start) &&
+                          !time.isAfter(end) &&
+                          (e['event'] == 'marked_event' ||
+                              '${e['event']}'.startsWith('practice_') ||
+                              e['event'] == 'session_paused' ||
+                              e['event'] == 'session_resumed');
+                    }))
+                      ListTile(
+                        title: Text(
+                          '${event['event']} · ${widget.session.entry.metadata.eventLabels[widget.session.entry.eventId(event)] ?? event['marker_label'] ?? event['description'] ?? ''}',
+                        ),
+                        subtitle: Text(
+                          '+${elapsedLabel(DateTime.parse(event['received_utc'] as String).difference(_origin).inMicroseconds / 1000000)} · ${event['received_utc']}\n${widget.session.entry.metadata.eventNotes[widget.session.entry.eventId(event)] ?? ''}',
+                        ),
+                        trailing:
+                            event['event'] == 'marked_event' &&
+                                widget.onEditEvent != null &&
+                                !widget.repository.isActive(
+                                  widget.session.entry.id,
+                                )
+                            ? IconButton(
+                                tooltip: 'Edit event and note',
+                                icon: const Icon(Icons.edit_note),
+                                onPressed: () => widget.onEditEvent!(
+                                  widget.session.entry.eventId(event),
+                                ),
+                              )
+                            : null,
+                      ),
+                  ],
+                ),
+                for (final warning in {
+                  ...widget.session.warnings,
+                  ...?signals?.warnings,
+                })
+                  Text(warning),
+                FilledButton.icon(
+                  onPressed:
+                      _saving ||
+                          snapshot.connectionState != ConnectionState.done
+                      ? null
+                      : () => _save(signals),
+                  icon: const Icon(Icons.save_outlined),
+                  label: Text(_saving ? 'Saving…' : 'Save analysis review'),
+                ),
+                if (_notice != null) Text(_notice!),
               ],
-            ),
-            for (final warning in {
-              ...widget.session.warnings,
-              ...?signals?.warnings,
-            })
-              Text(warning),
-            FilledButton.icon(
-              onPressed:
-                  _saving || snapshot.connectionState != ConnectionState.done
-                  ? null
-                  : () => _save(signals),
-              icon: const Icon(Icons.save_outlined),
-              label: Text(_saving ? 'Saving…' : 'Save analysis review'),
-            ),
-            if (_notice != null) Text(_notice!),
-          ],
-        );
-      },
-    ),
-  );
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  InspectionValue? _blockInspection(DateTime time) {
+    for (final b in _blocks) {
+      if (!time.isBefore(b.start) && time.isBefore(b.end)) {
+        final value = b.ready ? b.metrics['RMSSD'] : null;
+        return value == null
+            ? null
+            : InspectionValue(
+                b.end,
+                '${value.toStringAsFixed(2)} ms RMSSD (${elapsedLabel(b.start.difference(_origin).inMicroseconds / 1000000)}–${elapsedLabel(b.end.difference(_origin).inMicroseconds / 1000000)} block)',
+              );
+      }
+    }
+    return null;
+  }
+
   Widget _eegContent(SignalReview signals) => EegComparisonPlot(
     frames: signals.bands.map((b) => b.frame).toList(),
     origin: _origin,

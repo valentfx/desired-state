@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import 'eeg_bands.dart';
+import 'plot_inspection.dart';
+import 'plot_template.dart';
 import 'session_controller.dart';
 
 const eegBandColors = <String, Color>{
@@ -183,9 +185,10 @@ class _EegComparisonPlotState extends State<EegComparisonPlot> {
         SizedBox(
           height: 220,
           width: double.infinity,
-          child: CustomPaint(
+          child: SignalPlot(
             painter: EegAxisPainter(
               series,
+              timeOrigin: widget.origin,
               left: widget.left,
               right: math.max(widget.left + .001, widget.right),
               minimum: _units == '%' || _units == 'µV²' ? 0 : low - padding,
@@ -333,7 +336,12 @@ class EegLivePanel extends StatelessWidget {
         return const SizedBox.shrink();
       }
       final end = muse.latestBands?.time ?? DateTime.now();
-      final origin = end.subtract(const Duration(seconds: 60));
+      final origin =
+          controller.sessionStartedAt ??
+          (muse.bandHistory.isEmpty
+              ? controller.plotOrigin
+              : muse.bandHistory.first.time);
+      final right = end.difference(origin).inMicroseconds / 1000000;
       return ExpansionTile(
         title: const Text('EEG band activity'),
         children: [
@@ -343,8 +351,8 @@ class EegLivePanel extends StatelessWidget {
                 : null,
             frames: muse.bandHistory,
             origin: origin,
-            left: 0,
-            right: 60,
+            left: math.max(0, right - 60),
+            right: math.max(.001, right),
             screening: controller.preferences.eegArtifactScreening,
             onScreeningChanged: (v) => _saveScreen(v, context),
             events: controller.eventTimes
@@ -358,7 +366,11 @@ class EegLivePanel extends StatelessWidget {
           ExpansionTile(
             title: const Text('Raw EEG overlay (µV)'),
             children: [
-              RawEegPlot(channels: muse.eegHistory, rate: muse.eegRate),
+              RawEegPlot(
+                channels: muse.eegHistory,
+                rate: muse.eegRate,
+                endTime: muse.lastSamplesAt,
+              ),
             ],
           ),
         ],
@@ -368,9 +380,15 @@ class EegLivePanel extends StatelessWidget {
 }
 
 class RawEegPlot extends StatelessWidget {
-  const RawEegPlot({super.key, required this.channels, required this.rate});
+  const RawEegPlot({
+    super.key,
+    required this.channels,
+    required this.rate,
+    this.endTime,
+  });
   final Map<String, List<double>> channels;
   final int rate;
+  final DateTime? endTime;
   @override
   Widget build(BuildContext context) {
     final series = {
@@ -390,9 +408,10 @@ class RawEegPlot extends StatelessWidget {
         SizedBox(
           height: 200,
           width: double.infinity,
-          child: CustomPaint(
+          child: SignalPlot(
             painter: EegAxisPainter(
               series,
+              timeOrigin: endTime,
               left: -1024 / math.max(1, rate),
               right: 0,
               minimum: -limit,
@@ -442,6 +461,8 @@ class EegAxisPainter extends CustomPainter {
     this.showPoints = false,
     this.events = const [],
     this.maximumGapSeconds = 5,
+    this.timeOrigin,
+    this.axisOffset = 0,
   });
   final Map<String, List<(double, double)>> series;
   final double left, right, minimum, maximum;
@@ -452,9 +473,11 @@ class EegAxisPainter extends CustomPainter {
   final bool showPoints;
   final double? maximumGapSeconds;
   final List<double> events;
+  final DateTime? timeOrigin;
+  final double axisOffset;
   @override
   void paint(Canvas canvas, Size size) {
-    final area = Rect.fromLTRB(58, 22, size.width - 8, size.height - 36);
+    final area = PlotTemplate.area(size);
     if (area.width <= 0 || area.height <= 0) {
       return;
     }
@@ -474,7 +497,7 @@ class EegAxisPainter extends CustomPainter {
     double y(double value) =>
         area.bottom - (value - minimum) / (maximum - minimum) * area.height;
     label(yLabel, const Offset(0, 0));
-    final grid = Paint()..color = Colors.grey.shade400;
+    final grid = Paint()..color = PlotTemplate.gridColor;
     final divisions = area.height < 80 ? 1 : 4;
     for (var i = 0; i <= divisions; i++) {
       final value = minimum + (maximum - minimum) * i / divisions;
@@ -487,11 +510,20 @@ class EegAxisPainter extends CustomPainter {
     }
     label(
       'min ${minimum.toStringAsFixed(1)} / max ${maximum.toStringAsFixed(1)}',
-      Offset(area.left, size.height - 12),
+      Offset(area.left, 10),
     );
-    label(left.toStringAsFixed(0), Offset(area.left, area.bottom + 4));
-    label(right.toStringAsFixed(0), Offset(area.right - 24, area.bottom + 4));
-    label('Time (s)', Offset(area.center.dx - 20, area.bottom + 4));
+    for (var i = 0; i <= (area.width < 260 ? 2 : 4); i++) {
+      final divisions = area.width < 260 ? 2 : 4;
+      final t = left + (right - left) * i / divisions;
+      label(
+        elapsedLabel(t + axisOffset),
+        Offset(x(t) - (i == 0 ? 0 : 20), area.bottom + 4),
+      );
+    }
+    label(
+      'Recording elapsed (mm:ss)',
+      Offset(area.center.dx - 60, size.height - 12),
+    );
     canvas.save();
     canvas.clipRect(area);
     for (final event in events) {
@@ -564,4 +596,40 @@ class EegAxisPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant EegAxisPainter oldDelegate) => true;
+}
+
+/// All signal charts share inspection and session-time labeling.
+class SignalPlot extends StatelessWidget {
+  const SignalPlot({super.key, required this.painter});
+  final EegAxisPainter painter;
+  @override
+  Widget build(BuildContext context) {
+    final scope = PlotInspectionScope.of(context);
+    final origin = painter.timeOrigin ?? scope?.origin ?? DateTime(1970);
+    final offset =
+        origin.difference(scope?.origin ?? origin).inMicroseconds / 1000000;
+    final display = EegAxisPainter(
+      painter.series,
+      left: painter.left,
+      right: painter.right,
+      minimum: painter.minimum,
+      maximum: painter.maximum,
+      yLabel: painter.yLabel,
+      colors: painter.colors,
+      dashedSeries: painter.dashedSeries,
+      references: painter.references,
+      showPoints: painter.showPoints,
+      events: painter.events,
+      maximumGapSeconds: painter.maximumGapSeconds,
+      axisOffset: offset,
+    );
+    return InspectableSignalPlot(
+      origin: origin,
+      series: painter.series,
+      left: painter.left,
+      right: painter.right,
+      unit: painter.yLabel,
+      child: CustomPaint(painter: display),
+    );
+  }
 }

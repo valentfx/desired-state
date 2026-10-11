@@ -51,9 +51,10 @@ class AthenaOpticalPanel extends StatelessWidget {
         SizedBox(
           height: 200,
           width: double.infinity,
-          child: CustomPaint(
+          child: SignalPlot(
             painter: EegAxisPainter(
               series,
+              timeOrigin: muse.lastOpticalAt,
               left: -1024 / math.max(1, muse.opticalRate),
               right: 0,
               minimum: low - padding,

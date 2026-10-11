@@ -7,6 +7,7 @@ import 'practice_screen.dart';
 import 'history_screen.dart';
 import 'session_controller.dart';
 import 'session_history.dart';
+import 'recording_assignments_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key, required this.controller});
@@ -25,6 +26,13 @@ class SettingsScreen extends StatelessWidget {
               builder: (_) => ParticipantsScreen(
                 store: ParticipantStore(
                   directoryProvider: controller.directoryProvider,
+                ),
+                onManageRecordings: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) =>
+                        RecordingAssignmentsScreen(controller: controller),
+                  ),
                 ),
                 onViewSessions: (profile) => Navigator.push(
                   context,

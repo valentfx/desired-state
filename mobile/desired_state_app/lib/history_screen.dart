@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
 import 'history_plot.dart';
+import 'plot_inspection.dart';
 import 'session_controller.dart';
 import 'session_history.dart';
 import 'state_feedback_widgets.dart';
@@ -10,6 +11,9 @@ import 'processing_screen.dart';
 import 'session_review_screen.dart';
 import 'session_timeline_screen.dart';
 import 'recording_types.dart';
+import 'recording_presentation.dart';
+import 'inspection_samples.dart';
+import 'signal_review.dart';
 
 Future<void> openSessionAnalysis(
   BuildContext context, {
@@ -181,10 +185,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
     body: SafeArea(
       child: Column(
         children: [
-          RecordingHistoryBanner(
-            controller: widget.controller,
-            onLive: widget.onLive,
-          ),
           Padding(
             padding: const EdgeInsets.all(12),
             child: TextField(
@@ -418,11 +418,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         : 'Incomplete / needs review';
                     return ListTile(
                       isThreeLine: true,
-                      title: Text(
-                        '${_label(entry)} · ${entry.started?.toLocal() ?? entry.id}',
-                      ),
+                      title: Text(recordingTitle(entry)),
                       subtitle: Text(
-                        '$state · ${entry.device}${_label(entry) == entry.participant ? '' : ' · recorded as ${entry.participant}'}\n${entry.metadata.description.isEmpty ? entry.id : entry.metadata.description}${entry.warnings.isEmpty ? '' : '\n${entry.warnings.first}'}',
+                        '${_label(entry)} · ${entry.started?.toLocal() ?? 'Unknown start'}\n${recordingDuration(entry)} · ${recordingSensors(entry)} · $state${entry.warnings.isEmpty ? '' : '\n${entry.warnings.first}'}',
                       ),
                       trailing: const Icon(Icons.chevron_right),
                       onTap: !entry.readable
@@ -498,7 +496,7 @@ class RecordingHistoryBanner extends StatelessWidget {
                 onPressed:
                     onLive ??
                     () => Navigator.popUntil(context, (route) => route.isFirst),
-                child: const Text('Session'),
+                child: const Text('Recording'),
               ),
             ],
           ),
@@ -526,6 +524,23 @@ class HistoryDetailScreen extends StatefulWidget {
 
 class _HistoryDetailScreenState extends State<HistoryDetailScreen> {
   int _analysisSection = 0;
+  Map<String, List<InspectionValue>> _savedSamples = {};
+  SignalReview? _savedSignals;
+  @override
+  void initState() {
+    super.initState();
+    loadInspectionSamples(widget.entry)
+        .then((samples) {
+          if (mounted) setState(() => _savedSamples = samples);
+        })
+        .catchError((Object _) {});
+    reviewSignals(widget.entry)
+        .then((signals) {
+          if (mounted) setState(() => _savedSignals = signals);
+        })
+        .catchError((Object _) {});
+  }
+
   late Future<HistorySession> _loading = widget.repository.open(widget.entry);
   bool _screened = false, _exporting = false;
   RangeValues _range = const RangeValues(0, 1);
@@ -607,436 +622,455 @@ class _HistoryDetailScreenState extends State<HistoryDetailScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: const Text('Session analysis'),
-      bottom: PreferredSize(
-        preferredSize: const Size.fromHeight(48),
-        child: Row(
-          children: [
-            Expanded(
-              child: TextButton(
-                onPressed: () => setState(() => _analysisSection = 0),
-                child: Text(_analysisSection == 0 ? 'Summary ✓' : 'Summary'),
+  Widget build(BuildContext context) => PlotInspectionScope(
+    saved: true,
+    origin: widget.entry.started ?? DateTime(1970),
+    controller: widget.controller,
+    valuesAt: (time) => {
+      ...inspectionSamplesAt(_savedSamples, time),
+      for (final band in ['Alpha', 'Beta', 'Theta', 'Delta', 'Gamma'])
+        band: nearestInspection(
+          [
+            for (final b in _savedSignals?.bands ?? <SavedBand>[])
+              HistoryPoint(
+                b.frame.time,
+                b.frame.values(null, decibels: true)[band],
+                b.segment,
               ),
-            ),
-            Expanded(
-              child: TextButton(
-                onPressed: () => setState(() => _analysisSection = 1),
-                child: Text(_analysisSection == 1 ? 'Signals ✓' : 'Signals'),
+          ],
+          time,
+          'dB re 1 µV²',
+        ),
+    },
+    child: Scaffold(
+      appBar: AppBar(
+        title: const Text('Recording analysis'),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(48),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextButton(
+                  onPressed: () => setState(() => _analysisSection = 0),
+                  child: Text(_analysisSection == 0 ? 'Summary ✓' : 'Summary'),
+                ),
               ),
+              Expanded(
+                child: TextButton(
+                  onPressed: () => setState(() => _analysisSection = 1),
+                  child: Text(_analysisSection == 1 ? 'Signals ✓' : 'Signals'),
+                ),
+              ),
+              Expanded(
+                child: TextButton(
+                  onPressed: () => setState(() => _analysisSection = 2),
+                  child: Text(
+                    _analysisSection == 2
+                        ? 'Analysis tools ✓'
+                        : 'Analysis tools',
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          if (widget.controller.sessionLogger?.sessionId != widget.entry.id)
+            IconButton(
+              tooltip: 'Delete local session',
+              icon: const Icon(Icons.delete_outline),
+              onPressed: () async {
+                try {
+                  await _delete(
+                    await widget.repository.readEntry(widget.entry.directory),
+                  );
+                } catch (error) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context)
+                        .showSnackBar(SnackBar(content: Text('$error')));
+                  }
+                }
+              },
             ),
-            Expanded(
-              child: TextButton(
-                onPressed: () => setState(() => _analysisSection = 2),
-                child: Text(
-                  _analysisSection == 2 ? 'Analysis tools ✓' : 'Analysis tools',
+          IconButton(
+            tooltip: 'State feedback',
+            icon: const Icon(Icons.sentiment_satisfied_alt),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute<void>(
+                builder: (_) => SessionFeedbackScreen(
+                  directory: widget.entry.directory,
+                  sessionId: widget.entry.id,
+                  allowWrite:
+                      widget.controller.sessionLogger?.sessionId !=
+                      widget.entry.id,
                 ),
               ),
             ),
-          ],
-        ),
-      ),
-      actions: [
-        if (widget.controller.sessionLogger?.sessionId != widget.entry.id)
+          ),
           IconButton(
-            tooltip: 'Delete local session',
-            icon: const Icon(Icons.delete_outline),
+            tooltip: 'Processing & plots',
+            icon: const Icon(Icons.tune),
             onPressed: () async {
               try {
-                await _delete(
-                  await widget.repository.readEntry(widget.entry.directory),
+                final session = await _loading;
+                if (!context.mounted) {
+                  return;
+                }
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => ProcessingScreen(
+                      controller: widget.controller,
+                      session: session,
+                      repository: widget.repository,
+                    ),
+                  ),
                 );
-              } catch (error) {
+              } catch (e) {
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context)
-                      .showSnackBar(SnackBar(content: Text('$error')));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Could not open processing: $e')),
+                  );
                 }
               }
             },
           ),
-        IconButton(
-          tooltip: 'State feedback',
-          icon: const Icon(Icons.sentiment_satisfied_alt),
-          onPressed: () => Navigator.push(
-            context,
-            MaterialPageRoute<void>(
-              builder: (_) => SessionFeedbackScreen(
-                directory: widget.entry.directory,
-                sessionId: widget.entry.id,
-                allowWrite:
-                    widget.controller.sessionLogger?.sessionId !=
-                    widget.entry.id,
-              ),
-            ),
+          IconButton(
+            tooltip: 'Refresh session',
+            onPressed: _reload,
+            icon: const Icon(Icons.refresh),
           ),
-        ),
-        IconButton(
-          tooltip: 'Processing & plots',
-          icon: const Icon(Icons.tune),
-          onPressed: () async {
-            try {
-              final session = await _loading;
-              if (!context.mounted) {
-                return;
-              }
-              await Navigator.push(
-                context,
-                MaterialPageRoute<void>(
-                  builder: (_) => ProcessingScreen(
-                    controller: widget.controller,
-                    session: session,
-                    repository: widget.repository,
-                  ),
-                ),
-              );
-            } catch (e) {
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Could not open processing: $e')),
-                );
-              }
-            }
-          },
-        ),
-        IconButton(
-          tooltip: 'Refresh session',
-          onPressed: _reload,
-          icon: const Icon(Icons.refresh),
-        ),
-      ],
-    ),
-    body: SafeArea(
-      child: Column(
-        children: [
-          RecordingHistoryBanner(
-            controller: widget.controller,
-            onLive: widget.onLive,
-          ),
-          Expanded(
-            child: FutureBuilder<HistorySession>(
-              future: _loading,
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return Center(
-                    child: Text('Could not open session: ${snapshot.error}'),
-                  );
-                }
-                if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                final session = snapshot.data!, entry = session.entry;
-                if (_analysisSection == 2) {
-                  return SessionReviewScreen(
-                    key: ValueKey(entry.id),
-                    session: session,
-                    repository: widget.repository,
-                    controller: widget.controller,
-                    onLive: widget.onLive,
-                    embedded: true,
-                  );
-                }
-                if (_analysisSection == 1) {
-                  return SessionTimelineScreen(
-                    key: ValueKey(entry.id),
-                    directory: entry.directory,
-                    origin: entry.started ?? DateTime(1970),
-                    end: entry.events
-                        .map(
-                          (event) =>
-                              DateTime.tryParse('${event['received_utc']}'),
-                        )
-                        .whereType<DateTime>()
-                        .fold<DateTime?>(
-                          null,
-                          (a, b) => a == null || b.isAfter(a) ? b : a,
-                        ),
-                    title: 'Session signals',
-                    controller: widget.controller,
-                    embedded: true,
-                  );
-                }
-                final active = widget.repository.isActive(entry.id);
-                final eventTimes = entry.events
-                    .where((r) => r['event'] == 'marked_event')
-                    .map((r) => DateTime.tryParse('${r['received_utc']}'))
-                    .whereType<DateTime>()
-                    .toList();
-                final times = [
-                  ...session.hr.map((p) => p.time),
-                  ...session.rr.map((p) => p.time),
-                  ...eventTimes,
-                ]..sort();
-                final first = times.isEmpty
-                    ? (entry.started ?? DateTime(1970))
-                    : times.first;
-                final last = times.isEmpty ? first : times.last;
-                final span = last.difference(first).inMicroseconds;
-                final uniqueTimes = times.toSet().toList();
-                final start = uniqueTimes.isEmpty
-                    ? first
-                    : uniqueTimes[((uniqueTimes.length - 1) * _range.start)
-                          .floor()];
-                final end = uniqueTimes.isEmpty
-                    ? last
-                    : uniqueTimes[((uniqueTimes.length - 1) * _range.end)
-                          .ceil()];
-                final canEdit = !active && entry.editsReadable;
-                return ListView(
-                  padding: const EdgeInsets.all(12),
-                  children: [
-                    const Text(
-                      'Summary uses recorded RR screening. Analysis tools recompute RR/HRV with the applied filter; raw sensor plots stay unchanged.',
-                    ),
-                    Text(
-                      entry.participant,
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    Text(
-                      '${entry.started?.toLocal() ?? 'Unknown start'} · ${entry.device}',
-                    ),
-                    if (entry.metadata.userInfo.isNotEmpty)
-                      Text(entry.metadata.userInfo),
-                    OutlinedButton.icon(
-                      onPressed: canEdit
-                          ? () async {
-                              final values = await editParticipant(
-                                context,
-                                participantId: entry.participantId,
-                                name: entry.participant,
-                                info: entry.metadata.userInfo,
-                                store: ParticipantStore(
-                                  directoryProvider:
-                                      widget.controller.directoryProvider,
-                                ),
-                                correction: true,
-                              );
-                              if (values == null) {
-                                return;
-                              }
-                              try {
-                                await widget.repository.saveMetadata(
-                                  entry,
-                                  participantMetadata(
-                                    entry.metadata,
-                                    values.$1,
-                                    values.$2,
-                                    participantId: values.$3,
-                                  ),
-                                );
-                                if (mounted) {
-                                  _reload();
-                                }
-                              } catch (error) {
-                                if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                        'Participant not saved: $error',
-                                      ),
-                                    ),
-                                  );
-                                }
-                              }
-                            }
-                          : null,
-                      icon: const Icon(Icons.person_outline),
-                      label: const Text('Assign / edit participant'),
-                    ),
-                    SelectableText(entry.id),
-                    Text(
-                      'O2Ring: ${session.oxygen.length} readings · '
-                      'H10 ACC: ${session.accelerationSamples} samples · EEG: ${session.eegSamples} samples · ECG: ${session.ecgSamples} samples',
-                    ),
-                    Text(
-                      active
-                          ? 'Active recording: saved-data snapshot; refresh for more. Stop before editing/export.'
-                          : entry.ended && session.warnings.isEmpty
-                          ? 'Completed session'
-                          : 'Incomplete / needs review: data may be missing.',
-                    ),
-                    if (session.warnings.isNotEmpty)
+        ],
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Expanded(
+              child: FutureBuilder<HistorySession>(
+                future: _loading,
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    return Center(
+                      child: Text('Could not open session: ${snapshot.error}'),
+                    );
+                  }
+                  if (!snapshot.hasData) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  final session = snapshot.data!, entry = session.entry;
+                  if (_analysisSection == 2) {
+                    return SessionReviewScreen(
+                      key: ValueKey(entry.id),
+                      session: session,
+                      repository: widget.repository,
+                      controller: widget.controller,
+                      onEditEvent: (id) => _edit(entry, eventId: id),
+                      onLive: widget.onLive,
+                      embedded: true,
+                    );
+                  }
+                  if (_analysisSection == 1) {
+                    return SessionTimelineScreen(
+                      key: ValueKey(entry.id),
+                      directory: entry.directory,
+                      origin: entry.started ?? DateTime(1970),
+                      end: entry.events
+                          .map(
+                            (event) =>
+                                DateTime.tryParse('${event['received_utc']}'),
+                          )
+                          .whereType<DateTime>()
+                          .fold<DateTime?>(
+                            null,
+                            (a, b) => a == null || b.isAfter(a) ? b : a,
+                          ),
+                      title: 'Session signals',
+                      controller: widget.controller,
+                      embedded: true,
+                    );
+                  }
+                  final active = widget.repository.isActive(entry.id);
+                  final eventTimes = entry.events
+                      .where((r) => r['event'] == 'marked_event')
+                      .map((r) => DateTime.tryParse('${r['received_utc']}'))
+                      .whereType<DateTime>()
+                      .toList();
+                  final times = [
+                    ...session.hr.map((p) => p.time),
+                    ...session.rr.map((p) => p.time),
+                    ...eventTimes,
+                  ]..sort();
+                  final first = times.isEmpty
+                      ? (entry.started ?? DateTime(1970))
+                      : times.first;
+                  final last = times.isEmpty ? first : times.last;
+                  final span = last.difference(first).inMicroseconds;
+                  final uniqueTimes = times.toSet().toList();
+                  final start = uniqueTimes.isEmpty
+                      ? first
+                      : uniqueTimes[((uniqueTimes.length - 1) * _range.start)
+                            .floor()];
+                  final end = uniqueTimes.isEmpty
+                      ? last
+                      : uniqueTimes[((uniqueTimes.length - 1) * _range.end)
+                            .ceil()];
+                  final canEdit = !active && entry.editsReadable;
+                  return ListView(
+                    padding: const EdgeInsets.all(12),
+                    children: [
+                      const Text(
+                        'Summary uses recorded RR screening. Analysis tools recompute RR/HRV with the applied filter; raw sensor plots stay unchanged.',
+                      ),
+                      Text(
+                        entry.participant,
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      Text('${entry.started?.toLocal() ?? 'Unknown start'}'),
+                      if (entry.metadata.userInfo.isNotEmpty)
+                        Text(entry.metadata.userInfo),
+                      Text(
+                        recordingTitle(entry),
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      Text(
+                        '${recordingDuration(entry)} · ${recordingSensors(entry)}',
+                      ),
                       ExpansionTile(
-                        title: Text('${session.warnings.length} data warnings'),
+                        title: const Text('Technical details'),
                         children: [
-                          for (final warning in session.warnings)
-                            ListTile(title: Text(warning)),
-                        ],
-                      ),
-                    Text(
-                      entry.metadata.description.isEmpty
-                          ? 'No description'
-                          : entry.metadata.description,
-                    ),
-                    Text(
-                      'What helped / how I felt: ${entry.metadata.notes.isEmpty ? 'No notes yet' : entry.metadata.notes}',
-                    ),
-                    Text('Outcome tags: ${entry.metadata.tags.join(', ')}'),
-                    Wrap(
-                      spacing: 8,
-                      children: [
-                        FilledButton.tonal(
-                          onPressed: canEdit ? () => _edit(entry) : null,
-                          child: const Text('Edit notes & tags'),
-                        ),
-                        OutlinedButton.icon(
-                          onPressed:
-                              !active && !_exporting && entry.editsReadable
-                              ? () => _export(entry)
-                              : null,
-                          icon: const Icon(Icons.ios_share),
-                          label: Text(
-                            _exporting ? 'Preparing…' : 'Re-export session',
-                          ),
-                        ),
-                      ],
-                    ),
-                    ExpansionTile(
-                      title: const Text('Events & notes'),
-                      children: [
-                        if (entry.events.isEmpty)
-                          const Text('No event records'),
-                        for (final event in entry.events.where(
-                          (r) => r['_invalid'] != true,
-                        ))
                           ListTile(
-                            title: Text(
-                              event['event'] ==
-                                      'processing_configuration_initial'
-                                  ? 'Initial analysis settings'
-                                  : event['event'] ==
-                                        'processing_configuration_changed'
-                                  ? 'Analysis settings changed'
-                                  : entry.metadata.eventLabels[entry.eventId(
-                                          event,
-                                        )] ??
-                                        '${event['marker_label'] ?? event['description'] ?? event['event'] ?? 'Event'}',
-                            ),
-                            subtitle: Text(
-                              '${event['received_utc'] ?? 'Unknown time'} · ${event['event']}\n${entry.metadata.eventNotes[entry.eventId(event)] ?? ''}',
-                            ),
-                            trailing: event['event'] == 'marked_event'
-                                ? IconButton(
-                                    tooltip: 'Edit event note',
-                                    icon: const Icon(Icons.note_alt_outlined),
-                                    onPressed: canEdit
-                                        ? () => _edit(
-                                            entry,
-                                            eventId: entry.eventId(event),
-                                          )
-                                        : null,
-                                  )
-                                : null,
+                            title: const Text('Recording ID'),
+                            subtitle: SelectableText(entry.id),
                           ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    SegmentedButton<bool>(
-                      segments: const [
-                        ButtonSegment(value: false, label: Text('Raw')),
-                        ButtonSegment(
-                          value: true,
-                          label: Text('Current screened'),
+                          ListTile(
+                            title: const Text('Device IDs'),
+                            subtitle: SelectableText(entry.device),
+                          ),
+                          if (entry.participantId != null)
+                            ListTile(
+                              title: const Text('Participant ID'),
+                              subtitle: SelectableText(entry.participantId!),
+                            ),
+                        ],
+                      ),
+                      Text(
+                        'O2Ring: ${session.oxygen.length} readings · '
+                        'H10 ACC: ${session.accelerationSamples} samples · EEG: ${session.eegSamples} samples · ECG: ${session.ecgSamples} samples',
+                      ),
+                      Text(
+                        active
+                            ? 'Active recording: saved-data snapshot; refresh for more. Stop before editing/export.'
+                            : entry.ended && session.warnings.isEmpty
+                            ? 'Completed session'
+                            : 'Incomplete / needs review: data may be missing.',
+                      ),
+                      if (session.warnings.isNotEmpty)
+                        ExpansionTile(
+                          title: Text(
+                            '${session.warnings.length} data warnings',
+                          ),
+                          children: [
+                            for (final warning in session.warnings)
+                              ListTile(title: Text(warning)),
+                          ],
                         ),
-                      ],
-                      selected: {_screened},
-                      onSelectionChanged: (v) => setState(() {
-                        _screened = v.first;
-                        _inspected = null;
-                      }),
-                    ),
-                    const Text(
-                      'Fixed v1 comparison (configurable analysis: tune button above). Current screen: 300–2000 ms, median of 9 accepted RR, 25% deviation. RMSSD: latest 60 acquired RR, at least 3 usable values and 1 contiguous pair. Raw RMSSD excludes nonpositive values only. Pauses/gaps break pairs. Provisional, not ECG-verified NN.',
-                    ),
-                    Text(
-                      '${session.rr.length} raw RR · ${session.rr.where((r) => !r.accepted).length} excluded by current screen. HR is reported by the device and is unchanged by this selector.',
-                    ),
-                    const Text(
-                      'Receipt times, not exact beat timestamps. Purple lines are marked events. Tap a plot to inspect.',
-                    ),
-                    if (span > 0) ...[
-                      Row(
+                      Text(
+                        entry.metadata.description.isEmpty
+                            ? 'No description'
+                            : entry.metadata.description,
+                      ),
+                      Text(
+                        'What helped / how I felt: ${entry.metadata.notes.isEmpty ? 'No notes yet' : entry.metadata.notes}',
+                      ),
+                      Text('Outcome tags: ${entry.metadata.tags.join(', ')}'),
+                      Wrap(
+                        spacing: 8,
                         children: [
-                          const Expanded(child: Text('Visible time range')),
-                          TextButton(
-                            onPressed: () => setState(() {
-                              _range = const RangeValues(0, 1);
-                              _inspected = null;
-                            }),
-                            child: const Text('Fit data'),
+                          FilledButton.tonal(
+                            onPressed: canEdit ? () => _edit(entry) : null,
+                            child: const Text('Edit notes & tags'),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed:
+                                !active && !_exporting && entry.editsReadable
+                                ? () => _export(entry)
+                                : null,
+                            icon: const Icon(Icons.ios_share),
+                            label: Text(
+                              _exporting ? 'Preparing…' : 'Re-export session',
+                            ),
                           ),
                         ],
                       ),
-                      RangeSlider(
-                        values: _range,
-                        min: 0,
-                        max: 1,
-                        onChanged: (value) => setState(() {
-                          if (value.end - value.start >=
-                              1 / (uniqueTimes.length - 1)) {
-                            _range = value;
-                          }
+                      ExpansionTile(
+                        title: const Text('Events & notes'),
+                        children: [
+                          if (entry.events.isEmpty)
+                            const Text('No event records'),
+                          for (final event in entry.events.where(
+                            (r) => r['_invalid'] != true,
+                          ))
+                            ListTile(
+                              title: Text(
+                                event['event'] ==
+                                        'processing_configuration_initial'
+                                    ? 'Initial analysis settings'
+                                    : event['event'] ==
+                                          'processing_configuration_changed'
+                                    ? 'Analysis settings changed'
+                                    : entry.metadata.eventLabels[entry.eventId(
+                                            event,
+                                          )] ??
+                                          '${event['marker_label'] ?? event['description'] ?? event['event'] ?? 'Event'}',
+                              ),
+                              subtitle: Text(
+                                '${event['received_utc'] ?? 'Unknown time'} · ${event['event']}\n${entry.metadata.eventNotes[entry.eventId(event)] ?? ''}',
+                              ),
+                              trailing: event['event'] == 'marked_event'
+                                  ? IconButton(
+                                      tooltip: 'Edit event note',
+                                      icon: const Icon(Icons.note_alt_outlined),
+                                      onPressed: canEdit
+                                          ? () => _edit(
+                                              entry,
+                                              eventId: entry.eventId(event),
+                                            )
+                                          : null,
+                                    )
+                                  : null,
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      SegmentedButton<bool>(
+                        segments: const [
+                          ButtonSegment(value: false, label: Text('Raw')),
+                          ButtonSegment(
+                            value: true,
+                            label: Text('Current screened'),
+                          ),
+                        ],
+                        selected: {_screened},
+                        onSelectionChanged: (v) => setState(() {
+                          _screened = v.first;
                           _inspected = null;
                         }),
                       ),
-                    ],
-                    Text('${start.toLocal()} – ${end.toLocal()}'),
-                    for (final series
-                        in <(String, String, List<HistoryPoint>, Color)>[
-                          ('HR', 'bpm', session.hr, Colors.blue.shade700),
-                          (
-                            'RR',
-                            'ms',
-                            session.rrSeries(_screened),
-                            Colors.deepPurple,
-                          ),
-                          (
-                            'RMSSD',
-                            'ms',
-                            session.rmssdSeries(_screened),
-                            Colors.orange.shade800,
-                          ),
-                        ]) ...[
-                      HistoryPlot(
-                        title: series.$1,
-                        unit: series.$2,
-                        points: series.$3,
-                        start: start,
-                        end: end,
-                        events: eventTimes,
-                        color: series.$4,
-                        cursor: _inspected?.time,
-                        onInspect: (point) => setState(() {
-                          _inspected = point;
-                          _inspectedMetric = series.$1;
-                        }),
+                      const Text(
+                        'Fixed v1 comparison (configurable analysis: tune button above). Current screen: 300–2000 ms, median of 9 accepted RR, 25% deviation. RMSSD: latest 60 acquired RR, at least 3 usable values and 1 contiguous pair. Raw RMSSD excludes nonpositive values only. Pauses/gaps break pairs. Provisional, not ECG-verified NN.',
                       ),
-                      if (_inspected != null && _inspectedMetric == series.$1)
-                        _inspection(session),
-                    ],
-                    if (entry.revisions.isNotEmpty)
-                      ExpansionTile(
-                        title: Text('Edit history (${entry.revisions.length})'),
-                        children: [
-                          for (final revision in entry.revisions)
-                            ListTile(
-                              title: Text(
-                                '${revision['edited_utc'] ?? 'Unknown edit time'}',
-                              ),
-                              subtitle: Text(
-                                'Description: ${(revision['previous'] is Map ? revision['previous'] as Map : null)?['description'] ?? ''} → ${(revision['values'] is Map ? revision['values'] as Map : null)?['description'] ?? ''}\n'
-                                'Notes: ${(revision['previous'] is Map ? revision['previous'] as Map : null)?['notes'] ?? ''} → ${(revision['values'] is Map ? revision['values'] as Map : null)?['notes'] ?? ''}\n'
-                                'Tags: ${(revision['values'] is Map ? revision['values'] as Map : null)?['outcome_tags'] ?? ''}',
-                              ),
+                      Text(
+                        '${session.rr.length} raw RR · ${session.rr.where((r) => !r.accepted).length} excluded by current screen. HR is reported by the device and is unchanged by this selector.',
+                      ),
+                      const Text(
+                        'Receipt times, not exact beat timestamps. Purple lines are marked events. Tap a plot to inspect.',
+                      ),
+                      if (span > 0) ...[
+                        Row(
+                          children: [
+                            const Expanded(child: Text('Visible time range')),
+                            TextButton(
+                              onPressed: () => setState(() {
+                                _range = const RangeValues(0, 1);
+                                _inspected = null;
+                              }),
+                              child: const Text('Fit data'),
                             ),
-                        ],
-                      ),
-                  ],
-                );
-              },
+                          ],
+                        ),
+                        RangeSlider(
+                          values: _range,
+                          min: 0,
+                          max: 1,
+                          onChanged: (value) => setState(() {
+                            if (value.end - value.start >=
+                                1 / (uniqueTimes.length - 1)) {
+                              _range = value;
+                            }
+                            _inspected = null;
+                          }),
+                        ),
+                      ],
+                      Text('${start.toLocal()} – ${end.toLocal()}'),
+                      for (final series
+                          in <(String, String, List<HistoryPoint>, Color)>[
+                            ('HR', 'bpm', session.hr, Colors.blue.shade700),
+                            (
+                              'RR',
+                              'ms',
+                              session.rrSeries(_screened),
+                              Colors.deepPurple,
+                            ),
+                            (
+                              'RMSSD',
+                              'ms',
+                              session.rmssdSeries(_screened),
+                              Colors.orange.shade800,
+                            ),
+                          ]) ...[
+                        PlotInspectionScope(
+                          saved: true,
+                          origin: entry.started ?? start,
+                          controller: widget.controller,
+                          valuesAt: (time) => {
+                            'BPM': nearestInspection(session.hr, time, 'bpm'),
+                            'HRV': nearestInspection(
+                              session.rmssdSeries(_screened),
+                              time,
+                              'ms RMSSD',
+                            ),
+                            'RR': nearestInspection(
+                              session.rrSeries(_screened),
+                              time,
+                              'ms',
+                            ),
+                          },
+                          child: HistoryPlot(
+                            origin: entry.started ?? start,
+                            title: series.$1,
+                            unit: series.$2,
+                            points: series.$3,
+                            start: start,
+                            end: end,
+                            events: eventTimes,
+                            color: series.$4,
+                            cursor: _inspected?.time,
+                            onInspect: (point) => setState(() {
+                              _inspected = point;
+                              _inspectedMetric = series.$1;
+                            }),
+                          ),
+                        ),
+                        if (_inspected != null && _inspectedMetric == series.$1)
+                          _inspection(session),
+                      ],
+                      if (entry.revisions.isNotEmpty)
+                        ExpansionTile(
+                          title: Text(
+                            'Edit history (${entry.revisions.length})',
+                          ),
+                          children: [
+                            for (final revision in entry.revisions)
+                              ListTile(
+                                title: Text(
+                                  '${revision['edited_utc'] ?? 'Unknown edit time'}',
+                                ),
+                                subtitle: Text(
+                                  'Description: ${(revision['previous'] is Map ? revision['previous'] as Map : null)?['description'] ?? ''} → ${(revision['values'] is Map ? revision['values'] as Map : null)?['description'] ?? ''}\n'
+                                  'Notes: ${(revision['previous'] is Map ? revision['previous'] as Map : null)?['notes'] ?? ''} → ${(revision['values'] is Map ? revision['values'] as Map : null)?['notes'] ?? ''}\n'
+                                  'Tags: ${(revision['values'] is Map ? revision['values'] as Map : null)?['outcome_tags'] ?? ''}',
+                                ),
+                              ),
+                          ],
+                        ),
+                    ],
+                  );
+                },
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     ),
   );
@@ -1197,7 +1231,7 @@ class _HistoryMetadataEditorState extends State<HistoryMetadataEditor> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
-      title: Text(widget.eventId == null ? 'Session notes' : 'Event note'),
+      title: Text(widget.eventId == null ? 'Recording notes' : 'Event note'),
       actions: [
         TextButton(
           onPressed: _saving ? null : _save,
@@ -1209,11 +1243,6 @@ class _HistoryMetadataEditorState extends State<HistoryMetadataEditor> {
       child: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          if (widget.controller != null)
-            RecordingHistoryBanner(
-              controller: widget.controller!,
-              onLive: widget.onLive,
-            ),
           if (_error != null) Text(_error!),
           if (widget.eventId != null)
             TextField(

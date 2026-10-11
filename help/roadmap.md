@@ -213,3 +213,31 @@ Work-PC validation: Flutter analysis passed after context guard; full tests repo
 
 ## Apple delivery gates — 2026-10-09
 Bootstrap source and manual cloud workflows are prepared; Apple support is not yet runtime-validated. First pass the unsigned iOS build, then configure Apple team/bundle ID and distribution/API credentials for manual TestFlight upload. Validate app lifecycle, saved analysis, H10/O2Ring hardware, denied permissions, exports, reconnect and locked-screen continuity on iPhone/iPad. Port the Muse native bridge separately. Compile/test macOS and choose its signing/notarization distribution route after iOS validation. See apple-development.md for the exact Windows-to-cloud workflow and current limits.
+
+
+## Recording validation gates — 2026-10-10
+Source prepared for Recording rename, next-recording full setup, type popularity, unified settings and time/value inspection. Run the guarded update and full Flutter checks on the home PC. On Android verify SDNN/RR selections actually appear and persist, popup fields save across restart, long-session axes stay relative to recording start, tap/drag/close remain usable at small font and large accessibility scale, and saved inspection never reads current live streams. Confirm new type/event persistence and event-note editing/export after stop. File-backed Signals timeline inspection remains display-reduced; exact waveform replay and original low-rate views are the sources for precise sample inspection. Apple signing/TestFlight remains paused per user; no new Apple hardware claim.
+
+## 2026-10-11 — Next Analyze iteration
+
+- Keep `app-map.md` current for every screen/action move. Capture options belong in Recording; saved identity corrections belong in Settings → Participants.
+- Validate shared marker/readout across H10, ECG, EEG and below-fold plots on the phone; exercise held/live waveforms, absent ECG, continuity gaps, switching saved sections, and starting another recording.
+- Run the cumulative update's Flutter analysis/tests/debug APK; added widget cases remain unexecuted here. Iterate Analyze usefulness with real recordings after this pass, especially quality/context summaries and comparison workflows.
+
+- Home analyzer correction: rerun analysis, widget tests and debug APK after applying desired-state-analyze-fix.zip. Initial update applied, but all 24 reported issues must be cleared before phone testing; successful dependency resolution does not establish app validation.
+
+- Home widget follow-up: repeat the full suite after desired-state-widget-fix.zip; latest confirmed analysis is clean and latest confirmed widget result is 177 passed / 9 failed. Verify compact layout and live/saved cursor on the phone after a successful APK build. Use the reusable ZIP picker for subsequent source packages.
+
+## 2026-10-10 — Widget follow-up result and pending layout diagnostic
+
+Home trace confirms the widget fix applied, analyzer clean, and 182 tests passed / four failed; APK was gated by failures. RecordingTypeStore now releases its usage-write tail after completion/error, matching its definition-write queue and ParticipantStore, so later widget-test clocks do not await a retained future from an earlier clock. Processing navigation scrolls to the lazily built advanced-tools row before tapping. The compact reconnect test prints the full original overflow diagnostic while retaining the failure assertion; the 116-pixel overflow remains unresolved until its widget/constraints are available. No speculative additional layout change.
+
+Workspace: Dart format, standalone storage checks and incremental patch/source validation. Full Flutter rerun/APK pending on home PC. No install, commit or push.
+
+## 2026-10-10 — Flutter turnaround and package identity
+
+User requires copyable commit commands with every delivery and fewer validation rounds. Added help/flutter-regressions.md and AGENTS delivery guidance for constructor analysis, pending-only queues, lazy list construction, stable finders, live timer/I/O waits, original overflow diagnostics and exact package identity. Picker source prints ZIP/extraction/installer progress. Latest home attachment reran desired-state-widget-fix (182 passing / four failing); it did not run desired-state-widget-followup. These workflow changes are in workspace source for the next package; no new home test result, APK or commit is claimed.
+
+## 2026-10-10 — Diagnosed Overview overflow
+
+Home original widget-followup result: analyzer clean, 186 tests passed / one failed. History queue and lazy Processing navigation checks now pass. Original Flutter layout diagnostic identifies Overview Column (360×540) overflowing by 116 pixels. Recording status banner now scrolls with Overview content in ready/loading/error states, so long connection status cannot exhaust a fixed header. Processing test gestures target the active ProcessingScreen scrollable instead of a previous route. Distribute the complete error ledger, AGENTS pre-build rule and picker progress in this correction. Workspace source/patch checks; home Flutter/APK rerun pending.

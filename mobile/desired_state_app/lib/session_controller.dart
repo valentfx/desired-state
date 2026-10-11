@@ -129,6 +129,8 @@ class SessionController extends ChangeNotifier {
           );
         }
       }
+      posturePreview.add((frame.receivedAt, posture));
+      if (posturePreview.length > 2000) posturePreview.removeAt(0);
       final previous = _lastAccTimestamp;
       if (previous != null &&
           (frame.sensorNanoseconds <= previous ||
@@ -248,6 +250,10 @@ class SessionController extends ChangeNotifier {
   SessionPreferences preferences = SessionPreferences();
   PostureCalibration? activeCalibration;
   String posture = 'Uncalibrated';
+  final plotPreviewOrigin = DateTime.now();
+  final Set<String> inspectionFields = {};
+  final List<(DateTime, String)> posturePreview = [];
+  DateTime get plotOrigin => sessionStartedAt ?? plotPreviewOrigin;
   String get currentPosture =>
       connected &&
           latestAcceleration != null &&

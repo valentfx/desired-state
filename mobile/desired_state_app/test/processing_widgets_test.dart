@@ -58,28 +58,24 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(home: CollectorScreen(controller: controller)),
       );
-      await tester.tap(find.byTooltip('Session settings'));
+      await tester.tap(find.byTooltip('Recording settings'));
       await settleIo(
         tester,
-        () => find.text('Processing & plots').evaluate().isNotEmpty,
-      );
-      await tester.tap(find.text('Processing & plots'));
-      await settleIo(
-        tester,
-        () => find.text('Filters & metrics').evaluate().isNotEmpty,
+        () =>
+            find.text('Recording settings').evaluate().isNotEmpty &&
+            find.byType(ProcessingEditor).evaluate().isNotEmpty,
       );
       await tester.scrollUntilVisible(
-        find.textContaining('receipt-time window'),
-        200,
-        scrollable: find.byType(Scrollable).first,
+        find.byType(DropdownButton<AnalysisMode>),
+        180,
+        scrollable: find
+            .descendant(
+              of: find.byType(ProcessingEditor),
+              matching: find.byType(Scrollable),
+            )
+            .first,
       );
-      await settleIo(
-        tester,
-        () => find.textContaining('receipt-time window').evaluate().isNotEmpty,
-      );
-      await tester.ensureVisible(find.byTooltip('Processing settings'));
-      await tester.tap(find.byTooltip('Processing settings'));
-      await tester.pumpAndSettle();
+      await tester.pump();
       await tester.tap(find.byType(DropdownButton<AnalysisMode>));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Range only').last);
@@ -102,11 +98,31 @@ void main() {
             controller.processing.config.mode == AnalysisMode.range &&
             find.byType(ProcessingEditor).evaluate().isEmpty,
       );
+      expect(controller.processing.config.metrics, contains('RR'));
+      await tester.tap(find.byTooltip('Advanced tools'));
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.widgetWithText(ListTile, 'Processing & plots'),
+        180,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pump();
+      await tester.tap(find.text('Processing & plots'));
+      await settleIo(
+        tester,
+        () => find.textContaining('receipt-time window').evaluate().isNotEmpty,
+      );
+      final processingScroll = find
+          .descendant(
+            of: find.byType(ProcessingScreen).hitTestable(),
+            matching: find.byType(Scrollable),
+          )
+          .first;
       final sliderFinder = find.byType(RangeSlider);
       await tester.scrollUntilVisible(
         sliderFinder,
         250,
-        scrollable: find.byType(Scrollable).first,
+        scrollable: processingScroll,
       );
       tester.widget<RangeSlider>(sliderFinder).onChanged!(
         const RangeValues(2, 5),
@@ -118,7 +134,7 @@ void main() {
       await tester.scrollUntilVisible(
         rrFinder,
         200,
-        scrollable: find.byType(Scrollable).first,
+        scrollable: processingScroll,
       );
       final plot = tester.widget<HistoryPlot>(rrFinder);
       expect(plot.start, start.add(const Duration(seconds: 2)));
@@ -130,14 +146,14 @@ void main() {
       await tester.scrollUntilVisible(
         find.text('Back to live / Fit data'),
         -250,
-        scrollable: find.byType(Scrollable).first,
+        scrollable: processingScroll,
       );
       await tester.tap(find.text('Back to live / Fit data'));
       await tester.pump();
       await tester.scrollUntilVisible(
         rrFinder,
         250,
-        scrollable: find.byType(Scrollable).first,
+        scrollable: processingScroll,
       );
       expect(
         tester.widget<HistoryPlot>(rrFinder).end,
@@ -198,7 +214,7 @@ void main() {
       await tester.scrollUntilVisible(
         find.text('SDNN'),
         250,
-        scrollable: find.byType(Scrollable).first,
+        scrollable: processingScroll,
       );
       await tester.tap(find.text('SDNN'));
       await tester.runAsync(() => tester.tap(find.text('Apply & save')));
@@ -220,7 +236,7 @@ void main() {
       await tester.scrollUntilVisible(
         find.text('SDNN (ms)'),
         250,
-        scrollable: find.byType(Scrollable).first,
+        scrollable: processingScroll,
       );
       expect(find.text('SDNN (ms)'), findsOneWidget);
       expect(tester.takeException(), isNull);

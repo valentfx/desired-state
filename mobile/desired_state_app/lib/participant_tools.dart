@@ -220,9 +220,11 @@ class ParticipantsScreen extends StatefulWidget {
     super.key,
     required this.store,
     this.onViewSessions,
+    this.onManageRecordings,
   });
   final ParticipantStore store;
   final ValueChanged<ParticipantProfile>? onViewSessions;
+  final VoidCallback? onManageRecordings;
   @override
   State<ParticipantsScreen> createState() => _ParticipantsScreenState();
 }
@@ -326,6 +328,15 @@ class _ParticipantsScreenState extends State<ParticipantsScreen> {
     ),
     body: Column(
       children: [
+        if (widget.onManageRecordings != null)
+          ListTile(
+            leading: const Icon(Icons.assignment_ind_outlined),
+            title: const Text('Recording assignments'),
+            subtitle: const Text(
+              'Correct the participant on a saved recording',
+            ),
+            onTap: widget.onManageRecordings,
+          ),
         Padding(
           padding: const EdgeInsets.all(12),
           child: TextField(

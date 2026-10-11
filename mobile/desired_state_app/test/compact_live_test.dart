@@ -159,6 +159,16 @@ void main() {
   testWidgets(
     'phone Live fits one screen, overlays freeze, device reconnect keeps session and gaps',
     (tester) async {
+      // The binding defers layout failures until takeException(). Print the
+      // full widget/constraint diagnostic at the point it occurs as well.
+      final reportError = FlutterError.onError!;
+      FlutterError.onError = (details) {
+        if (details.exceptionAsString().contains('RenderFlex overflowed')) {
+          debugPrint(details.toString());
+        }
+        reportError(details);
+      };
+      addTearDown(() => FlutterError.onError = reportError);
       late Directory root;
       late SessionController controller;
       final polar = FakePolar();
@@ -187,7 +197,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(home: SessionHome(controller: controller)),
       );
-      await openScreen(tester, 'Session');
+      await openScreen(tester, 'Recording');
       await settleIo(
         tester,
         () => find.byType(RelativeOverlayPlot).evaluate().isNotEmpty,

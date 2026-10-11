@@ -116,7 +116,7 @@ void main() {
       );
       expect(find.text('Analyze'), findsOneWidget);
       expect(controller.sessionLogger, isNull);
-      await openScreen(tester, 'Session');
+      await openScreen(tester, 'Recording');
       await tester.pumpAndSettle();
       await tester.enterText(
         find.widgetWithText(TextField, 'Participant name'),
@@ -140,16 +140,18 @@ void main() {
         tester,
         () =>
             controller.sessionLogger != null &&
-            find.byTooltip('Session notes').evaluate().isNotEmpty,
+            find.byTooltip('Recording notes').evaluate().isNotEmpty,
       );
       final logger = controller.sessionLogger!;
       expect(find.byType(BottomSheet), findsNothing);
       await settleIo(
         tester,
-        () => find.byTooltip('Session settings').evaluate().isNotEmpty,
+        () => find.byTooltip('Recording settings').evaluate().isNotEmpty,
       );
-      expect(find.byTooltip('Session settings'), findsOneWidget);
-      await tester.runAsync(() => tester.tap(find.byTooltip('Session notes')));
+      expect(find.byTooltip('Recording settings'), findsOneWidget);
+      await tester.runAsync(
+        () => tester.tap(find.byTooltip('Recording notes')),
+      );
       await settleIo(
         tester,
         () => find.byType(HistoryMetadataEditor).evaluate().isNotEmpty,
@@ -203,19 +205,14 @@ void main() {
         tester,
         () => find.text('Edit notes & tags').evaluate().isNotEmpty,
       );
-      await tester.tap(
-        find.descendant(
-          of: find.byType(RecordingHistoryBanner),
-          matching: find.text('Session'),
-        ),
-      );
+      await openScreen(tester, 'Recording');
       await tester.pumpAndSettle();
       expect(find.byTooltip('Stop recording'), findsOneWidget);
       expect(controller.sessionLogger, same(logger));
       await tester.runAsync(() => tester.tap(find.byTooltip('Stop recording')));
       await settleIo(
         tester,
-        () => find.text('Session saved').evaluate().isNotEmpty,
+        () => find.text('Recording saved').evaluate().isNotEmpty,
       );
       expect(find.byType(BottomSheet), findsNothing);
       await tester.runAsync(() async {
@@ -262,8 +259,12 @@ void main() {
       );
       await settleIo(
         tester,
-        () => find.textContaining('2 sessions').evaluate().isNotEmpty,
+        () => find
+            .text('Filter by participant, type and date')
+            .evaluate()
+            .isNotEmpty,
       );
+      expect(find.textContaining('2 sessions'), findsOneWidget);
       await tester.tap(find.text('Filter by participant, type and date'));
       await tester.pumpAndSettle();
       await tester.tap(find.byType(DropdownButton<String>).last);

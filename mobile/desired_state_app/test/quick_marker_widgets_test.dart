@@ -179,12 +179,13 @@ void main() {
         await until(() => controller.recordedMarkers.length == count);
       });
       await tester.pumpAndSettle();
-      expect(find.text('Add note'), findsNothing);
+      expect(find.text('Add note'), findsOneWidget);
       expect(find.text('Anxious'), findsNothing);
     }
     await tester.pumpAndSettle();
     expect(find.byType(TextField), findsNothing);
-    expect(find.textContaining('Filters & metrics'), findsOneWidget);
+    expect(find.byTooltip('Recording settings'), findsOneWidget);
+    expect(find.textContaining('Filters & metrics'), findsNothing);
     await tester.tap(find.text('How do I feel?'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('7'));
